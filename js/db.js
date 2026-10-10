@@ -72,6 +72,9 @@
     return 'CMD-' + String(n).padStart(4, '0');
   }
 
+  // Erreur de connexion qui demande l'affichage du champ « code secret »
+  function codeRequis(msg) { const e = new Error(msg); e.codeRequis = true; return e; }
+
   function checkCode(code) {
     if (!/^\d{4,6}$/.test(String(code || ''))) throw new Error('Le code secret doit contenir 4 à 6 chiffres.');
   }
@@ -135,12 +138,14 @@
       const c = this._findTel(telephone);
       if (!c) throw new Error('Aucun compte avec ce numéro.');
       if (c.bloque_jusqua && new Date(c.bloque_jusqua) > new Date()) throw new Error('Trop d\'essais. Réessayez dans quelques minutes.');
-      if (!c.code_hash) throw new Error('Ce compte n\'a pas encore de code. Demandez à Noecy votre lien de connexion.');
+      // Compte sans code (inscrit avant les codes secrets) : numéro seul
+      if (!c.code_hash) return { id: c.id, token: c.token, sans_code: true };
+      if (!code) throw codeRequis('Entrez votre code secret.');
       if ((await sha256(code)) !== c.code_hash) {
         c.essais = (c.essais || 0) + 1;
         if (c.essais >= 5) { c.bloque_jusqua = new Date(Date.now() + 15 * 60000).toISOString(); c.essais = 0; }
         this._save();
-        throw new Error('Code incorrect.');
+        throw codeRequis('Code incorrect.');
       }
       c.essais = 0; c.bloque_jusqua = null; this._save();
       return { id: c.id, token: c.token };
@@ -292,7 +297,9 @@
       return chkRpc(await this.sb.rpc('inscrire_client', { p_nom: nom, p_telephone: telephone || '', p_code: code || '' }));
     },
     async loginClient(telephone, code) {
-      return chkRpc(await this.sb.rpc('connexion_client', { p_telephone: telephone || '', p_code: code || '' }));
+      const d = chk(await this.sb.rpc('connexion_client', { p_telephone: telephone || '', p_code: code || '' }));
+      if (d && d.erreur) throw d.code_requis ? codeRequis(d.erreur) : new Error(d.erreur);
+      return d;
     },
     async setClientCode(id, token, code) {
       chkRpc(await this.sb.rpc('definir_code_client', { p_id: id, p_token: token, p_code: code }));

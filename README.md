@@ -25,7 +25,7 @@ Code PIN de l'espace gérante en mode local : **2012** (à changer dans Paramèt
 
 1. Créez un projet sur https://supabase.com (région *Europe*).
 2. **SQL Editor** → **New query** → collez `supabase/schema.sql` → **Run**.
-3. Nouvelle requête → collez `supabase/migration_v2.sql` → **Run** (caisse par compte, matières, réservations, connexion client, notifications).
+3. Nouvelle requête → collez `supabase/migration_v2.sql` → **Run** (si vous l'avez déjà exécuté avant la v2.1, exécutez aussi `supabase/migration_v2_1.sql`) (caisse par compte, matières, réservations, connexion client, notifications).
 4. **Authentication → Users → Add user** : créez votre compte gérante (cochez *Auto Confirm User*), puis :
    ```sql
    insert into admins (email) values ('votre.email@exemple.com');
@@ -73,7 +73,8 @@ Ajoutez `{montant}` pour pré-remplir le montant, par exemple `https://pay.wave.
 
 ### Clients sans mot de passe
 - À l'inscription, le client choisit un **code secret** (4 à 6 chiffres).
-- Sur un autre téléphone : « J'ai déjà un compte » → numéro + code. Après 5 erreurs, le compte est bloqué 15 minutes.
+- Sur un autre téléphone : « J'ai déjà un compte » → numéro, puis code. Après 5 erreurs, le compte est bloqué 15 minutes.
+- Clients inscrits avant les codes (sans code) : le **numéro seul** suffit ; l'app leur propose aussitôt de créer leur code. Tant qu'ils n'en ont pas, quelqu'un qui connaît leur numéro pourrait se connecter à leur place.
 - Code oublié ou ancien client sans code : **Clients → Lien** envoie par WhatsApp un lien de connexion personnel, ou **Clients → clé** définit un nouveau code.
 
 ### Commandes et argent

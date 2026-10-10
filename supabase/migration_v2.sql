@@ -114,7 +114,7 @@ begin
   return json_build_object('id', c.id, 'token', c.token);
 end $$;
 
--- Connexion depuis un autre appareil : téléphone + code secret.
+-- Connexion depuis un autre appareil : téléphone + code secret (numéro seul si le compte n'a pas encore de code).
 -- Les échecs sont renvoyés en JSON (et non en exception) pour que le compteur d'essais soit enregistré.
 create or replace function connexion_client(p_telephone text, p_code text)
 returns json language plpgsql security definer set search_path = public, extensions as $$
@@ -129,15 +129,19 @@ begin
   if c.bloque_jusqua is not null and c.bloque_jusqua > now() then
     return json_build_object('erreur', 'Trop d''essais. Réessayez dans quelques minutes.');
   end if;
+  -- Compte inscrit avant les codes secrets : connexion avec le numéro seul (le client crée ensuite son code)
   if c.code_hash is null then
-    return json_build_object('erreur', 'Ce compte n''a pas encore de code. Demandez à Noecy votre lien de connexion.');
+    return json_build_object('id', c.id, 'token', c.token, 'sans_code', true);
   end if;
-  if crypt(coalesce(p_code, ''), c.code_hash) <> c.code_hash then
+  if coalesce(p_code, '') = '' then
+    return json_build_object('erreur', 'Entrez votre code secret.', 'code_requis', true);
+  end if;
+  if crypt(p_code, c.code_hash) <> c.code_hash then
     update clients set
       essais = case when essais + 1 >= 5 then 0 else essais + 1 end,
       bloque_jusqua = case when essais + 1 >= 5 then now() + interval '15 minutes' else bloque_jusqua end
     where id = c.id;
-    return json_build_object('erreur', 'Code incorrect.');
+    return json_build_object('erreur', 'Code incorrect.', 'code_requis', true);
   end if;
   update clients set essais = 0, bloque_jusqua = null where id = c.id;
   return json_build_object('id', c.id, 'token', c.token);
