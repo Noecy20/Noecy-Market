@@ -1,5 +1,5 @@
 /*
- * Noecy Market — espace gérante : caisse, crédits & dettes, paramètres
+^ * Plateforme — espace de gestion : caisse, crédits & dettes, paramètres
  */
 'use strict';
 
@@ -200,7 +200,7 @@ Object.assign(ACT, {
   },
   'rel-push': (el) => run(el, async () => {
     const { msg } = messageRelance(el.dataset.id);
-    const r = await DB.sendPush({ cible: 'client', client_id: el.dataset.id, titre: 'Rappel Noecy Market', corps: msg, url: '/', tag: 'rappel' });
+    const r = await DB.sendPush({ cible: 'client', client_id: el.dataset.id, titre: `Rappel ${A.boutique.nom}`, corps: msg, url: '/', tag: 'rappel' });
     toast(r && r.envoyes ? 'Notification envoyée' : "Ce client n'a pas activé les notifications : utilisez WhatsApp.", r && r.envoyes ? 'ok' : 'warn', 5000);
   }),
 });
@@ -225,8 +225,17 @@ PAGES.parametres = {
         ${isIOS && !isStandalone() ? `<p class="note-box info small" style="margin-top:12px">${ic('smartphone')}<span>Sur iPhone : touchez <b>Partager</b> puis <b>« Sur l'écran d'accueil »</b>, ouvrez l'app depuis l'icône, puis revenez ici activer les notifications.</span></p>` : ''}
         ${DB.mode === 'local' ? '<p class="small muted" style="margin-top:10px">En mode local, seules les notifications du navigateur (onglet ouvert) sont possibles.</p>' : ''}
       </div>
-      <div class="card"><div class="card-head"><h3>Boutique</h3></div>
-        <div class="field"><label>Nom de la boutique</label><input id="s-nom" value="${esc(s.nom_boutique)}"></div>
+      <div class="card"><div class="card-head"><h3>Ma ${estResto() ? 'page restaurant' : 'boutique'}</h3><span class="pill info">${estResto() ? 'Restaurant' : 'Vente de produits'}</span></div>
+        <label class="dropzone" id="bq-dz"><div class="prev" id="bq-prev">${A.boutique.logo ? `<img src="${esc(A.boutique.logo)}" class="pv">` : ic('image')}</div>
+          <div><b>Logo</b><p class="small muted">Image carrée de préférence (compressée automatiquement).</p>${A.boutique.logo ? '<button type="button" class="btn ghost sm" id="bq-rm" style="margin-top:6px">Retirer</button>' : ''}</div>
+          <input type="file" accept="image/*" id="bq-file"></label>
+        <div class="row" style="margin-top:12px"><div class="field"><label>Nom</label><input id="s-nom" maxlength="60" value="${esc(A.boutique.nom)}"></div>
+          <div class="field"><label>Couleur principale</label><input type="color" id="bq-couleur" value="${esc(A.boutique.couleur || '#6d1b4f')}" class="color-big"></div></div>
+        <div class="field"><label>Ville / quartier</label><input id="bq-ville" maxlength="60" value="${esc(A.boutique.ville || '')}"></div>
+        <div class="field"><label>Présentation (affichée sur la vitrine)</label><textarea id="bq-desc" maxlength="400">${esc(A.boutique.description || '')}</textarea></div>
+        <div class="field"><label>Lien à partager à vos clients</label><div class="copy-line"><input class="input" readonly value="${esc(lienBoutique(A.boutique.slug))}"><button type="button" class="btn soft sm" data-act="bq-copier">${ic('copy')} Copier</button></div></div>
+      </div>
+      <div class="card"><div class="card-head"><h3>Accueil & contact</h3></div>
         <div class="field"><label>Slogan (page d'accueil)</label><textarea id="s-slogan" maxlength="200">${esc(s.slogan)}</textarea></div>
         <div class="row"><div class="field"><label>WhatsApp de la boutique</label><input id="s-wa" type="tel" value="${esc(s.whatsapp)}" placeholder="77 123 45 67"></div>
         <div class="field"><label>Devise</label><input id="s-dev" value="${esc(s.devise)}" maxlength="8"></div></div>
@@ -255,6 +264,18 @@ PAGES.parametres = {
     <div class="save-bar"><button class="btn primary lg" data-act="settings-save">${ic('save')} Enregistrer les paramètres</button></div>`;
   },
   async after() {
+    // Logo de la boutique
+    A._logo = undefined;
+    const fi = $('#bq-file');
+    if (fi) {
+      const poser = async (f) => { if (!f || !f.type.startsWith('image/')) return; try { A._logo = await compressImage(f, 320, 0.85); $('#bq-prev').innerHTML = `<img src="${A._logo}" class="pv">`; } catch (e) { toast(e.message, 'err'); } };
+      fi.onchange = () => poser(fi.files[0]);
+      const dz = $('#bq-dz');
+      dz.addEventListener('dragover', (e) => { e.preventDefault(); dz.classList.add('over'); });
+      dz.addEventListener('dragleave', () => dz.classList.remove('over'));
+      dz.addEventListener('drop', (e) => { e.preventDefault(); dz.classList.remove('over'); poser(e.dataTransfer.files[0]); });
+      const rm = $('#bq-rm'); if (rm) rm.onclick = (e) => { e.preventDefault(); e.stopPropagation(); A._logo = null; $('#bq-prev').innerHTML = ic('image'); rm.remove(); icons(); };
+    }
     $$('#cats .cat-row').forEach((row) => {
       const prev = $('.cat-ic', row);
       $('[data-f=icone]', row).onchange = (e) => { prev.innerHTML = ic(e.target.value); icons(); };
@@ -285,13 +306,14 @@ Object.assign(ACT, {
   'admin-push': (el) => run(el, async () => {
     if (!DB.pushDisponible()) throw new Error('Notifications push disponibles uniquement en mode en ligne.');
     const sub = await subscribePush();
-    await DB.savePushAdmin(sub);
+    await DB.savePushAdmin(sub, 'admin');
+    if (A.me.super) await DB.savePushAdmin(sub, 'super');
     toast('Notifications activées sur cet appareil');
     renderPage(false);
   }),
   'admin-push-test': (el) => run(el, async () => {
     if (!DB.pushDisponible()) {
-      if (('Notification' in window) && Notification.permission === 'granted') { await localNotify('Noecy Market', 'Les notifications du navigateur fonctionnent.', '/admin.html'); return; }
+      if (('Notification' in window) && Notification.permission === 'granted') { await localNotify(A.boutique?.nom || PLATEFORME.nom || 'Notifications', 'Les notifications du navigateur fonctionnent.', '/admin.html'); return; }
       throw new Error('Activez d\'abord les notifications.');
     }
     const r = await DB.sendPush({ type: 'test' });
@@ -301,12 +323,12 @@ Object.assign(ACT, {
     if (!('Notification' in window)) throw new Error('Ce navigateur ne gère pas les notifications.');
     const p = await Notification.requestPermission();
     if (p !== 'granted') throw new Error('Notifications refusées par le navigateur.');
-    await localNotify('Noecy Market', 'Vous serez prévenue tant que l\'onglet reste ouvert.', '/admin.html');
+    await localNotify(A.boutique?.nom || PLATEFORME.nom || 'Notifications', 'Vous serez prévenue tant que l\'onglet reste ouvert.', '/admin.html');
     renderPage(false);
   }),
   'settings-save': (el) => run(el, async () => {
     const s = {
-      nom_boutique: $('#s-nom').value.trim() || 'Noecy Market',
+      nom_boutique: $('#s-nom').value.trim() || A.boutique.nom,
       slogan: $('#s-slogan').value.trim(),
       whatsapp: $('#s-wa').value.trim(),
       devise: $('#s-dev').value.trim() || 'FCFA',
@@ -316,6 +338,12 @@ Object.assign(ACT, {
     };
     if (s.wave_lien && !/^https?:\/\//i.test(s.wave_lien)) throw new Error('Le lien Wave doit commencer par https://');
     await DB.saveSettings(s);
+    // Fiche publique de la boutique (vitrine)
+    const fiche = { nom: s.nom_boutique, couleur: $('#bq-couleur').value, ville: $('#bq-ville').value.trim(), description: $('#bq-desc').value.trim() };
+    if (A._logo !== undefined) fiche.logo = A._logo;
+    A.boutique = await DB.majBoutique(A.boutique.id, fiche);
+    A._logo = undefined;
+    renderShell();
     for (const row of $$('#cats .cat-row')) {
       const c = A.categories.find((x) => x.id === row.dataset.id);
       const patch = { icone: $('[data-f=icone]', row).value || 'shopping-bag', nom: $('[data-f=nom]', row).value.trim() || 'Catégorie', couleur: $('[data-f=couleur]', row).value };
@@ -324,6 +352,10 @@ Object.assign(ACT, {
     toast('Paramètres enregistrés');
     await refreshAfter();
   }),
+  'bq-copier': () => {
+    const l = lienBoutique(A.boutique.slug);
+    (navigator.clipboard ? navigator.clipboard.writeText(l) : Promise.reject()).then(() => toast('Lien copié'), () => toast(l, 'info', 8000));
+  },
   'cat-add': (el) => run(el, async () => {
     await DB.insert('categories', { nom: 'Nouvelle catégorie', icone: 'shopping-bag', couleur: '#a02a6e', ordre: A.categories.length + 1 });
     await refreshAfter();

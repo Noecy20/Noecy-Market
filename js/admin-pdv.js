@@ -1,5 +1,5 @@
 /*
- * Noecy Market — espace gérante : points de vente (vendeurs)
+^ * Plateforme — espace de gestion : points de vente (vendeurs)
  * Un vendeur vend la marchandise du stock Noecy pour son propre compte.
  */
 'use strict';
@@ -7,7 +7,7 @@
 const DROITS = [
   ['credit', 'Vendre à crédit', 'Le client peut payer plus tard (son nom est alors obligatoire).'],
   ['encaisser', 'Encaisser les crédits', 'Enregistrer les remboursements de ses clients.'],
-  ['annuler', 'Annuler une vente', 'Les articles reviennent dans le stock Noecy.'],
+  ['annuler', 'Annuler une vente', 'Les articles reviennent dans le stock de la boutique.'],
   ['prix', 'Changer le prix de vente', 'Vendre à un autre prix que celui de la boutique.'],
   ['voir_stock', 'Voir les quantités en stock', 'Sinon il voit seulement « disponible » ou « épuisé ».'],
 ];
@@ -33,7 +33,7 @@ function statsVendeur(v, since = new Date(0)) {
 PAGES.pointsvente = {
   title: 'Points de vente',
   render() {
-    const head = `<div class="page-head"><div><h1>Points de vente</h1><p class="muted">Vos vendeurs vendent la marchandise de votre stock pour leur propre compte : leurs ventes et leur argent sont à eux, le stock Noecy baisse à chaque vente.</p></div>
+    const head = `<div class="page-head"><div><h1>Points de vente</h1><p class="muted">Vos vendeurs vendent la marchandise de votre stock pour leur propre compte : leurs ventes et leur argent sont à eux, votre stock baisse à chaque vente.</p></div>
       <button class="btn primary" data-act="pdv-edit">${ic('user-plus')} Nouveau vendeur</button></div>`;
     if (!A.v3) return head + `<div class="note-box">${ic('database')}<div><b>Mise à jour de la base requise.</b> Exécutez <code>supabase/migration_v3_vendeurs.sql</code> dans Supabase (SQL Editor) pour activer les points de vente.</div></div>`;
     const since = periodStart(A.periode);
@@ -44,7 +44,7 @@ PAGES.pointsvente = {
     <div class="toolbar"><div class="seg">${[['7', '7 jours'], ['30', '30 jours'], ['mois', 'Ce mois'], ['tout', 'Tout']].map(([k, l]) => `<button class="${A.periode === k ? 'on' : ''}" data-act="pdv-periode" data-p="${k}">${l}</button>`).join('')}</div></div>
     <div class="kpis">
       ${kpi('Ventes des points de vente', sum(actives, 'total'), 'store', '', true, `${actives.length} vente(s) · argent des vendeurs`, 0)}
-      ${kpi('Articles sortis du stock', sum(actives, (c) => sum(c.lignes || [], 'quantite')), 'package-minus', 'mango', false, 'Pris dans le stock Noecy', 1, go('inventaire', { inv: 'produits' }))}
+      ${kpi('Articles sortis du stock', sum(actives, (c) => sum(c.lignes || [], 'quantite')), 'package-minus', 'mango', false, 'Pris dans votre stock', 1, go('inventaire', { inv: 'produits' }))}
       ${kpi('Coût de la marchandise', sum(actives, 'cout_revient'), 'factory', 'caramel', true, 'Donnée aux points de vente', 2, go('rentabilite'))}
       ${kpi('Crédits des vendeurs', sum(tous, (x) => x.st.credits), 'hand-coins', 'danger', true, 'Leurs clients leur doivent', 3)}
     </div>

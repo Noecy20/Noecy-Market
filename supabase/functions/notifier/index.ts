@@ -1,4 +1,4 @@
-// Noecy Market — fonction Edge « notifier »
+// Plateforme — fonction Edge « notifier »
 // Envoie les notifications push (Web Push) à la gérante et aux clients.
 //
 // Appelée par :
@@ -50,8 +50,21 @@ async function envoyer(subs: Abonnement[], msg: Message): Promise<number> {
   return ok;
 }
 
-async function abonnesAdmins(): Promise<Abonnement[]> {
-  const { data } = await sb.from('abonnements_push').select('id,endpoint,p256dh,auth').eq('role', 'admin');
+// Gérants d'une boutique (et l'administrateur de la plateforme abonné à cette boutique)
+async function abonnesAdmins(boutiqueId?: string): Promise<Abonnement[]> {
+  let q = sb.from('abonnements_push').select('id,endpoint,p256dh,auth').eq('role', 'admin');
+  if (boutiqueId) q = q.eq('boutique_id', boutiqueId);
+  const { data } = await q;
+  return data ?? [];
+}
+// Administrateur de la plateforme
+async function abonnesSuper(): Promise<Abonnement[]> {
+  const { data } = await sb.from('abonnements_push').select('id,endpoint,p256dh,auth').eq('role', 'super');
+  return data ?? [];
+}
+// Tous les clients abonnés d'une boutique (ex. menu du jour publié)
+async function abonnesBoutique(boutiqueId: string): Promise<Abonnement[]> {
+  const { data } = await sb.from('abonnements_push').select('id,endpoint,p256dh,auth').eq('role', 'client').eq('boutique_id', boutiqueId);
   return data ?? [];
 }
 async function abonnesClient(clientId: string): Promise<Abonnement[]> {
@@ -59,18 +72,21 @@ async function abonnesClient(clientId: string): Promise<Abonnement[]> {
   return data ?? [];
 }
 
-async function estGerante(req: Request): Promise<boolean> {
+// Compte connecté : administrateur de la plateforme, ou membre de boutiques actives
+async function compte(req: Request): Promise<{ super: boolean; boutiques: string[] } | null> {
   const jwt = (req.headers.get('Authorization') ?? '').replace(/^Bearer\s+/i, '');
-  if (!jwt) return false;
+  if (!jwt) return null;
   const { data } = await sb.auth.getUser(jwt);
-  const email = data?.user?.email?.toLowerCase();
-  if (!email) return false;
+  const user = data?.user;
+  if (!user?.email) return null;
   const { data: admins } = await sb.from('admins').select('email');
-  return (admins ?? []).some((a: { email: string }) => a.email.toLowerCase() === email);
+  const sup = (admins ?? []).some((a: { email: string }) => a.email.toLowerCase() === user.email!.toLowerCase());
+  const { data: m } = await sb.from('membres').select('boutique_id, boutiques!inner(statut)').eq('user_id', user.id).eq('boutiques.statut', 'active');
+  return { super: sup, boutiques: (m ?? []).map((x: { boutique_id: string }) => x.boutique_id) };
 }
 
-async function parametres(): Promise<Record<string, unknown>> {
-  const { data } = await sb.from('parametres').select('cle,valeur');
+async function parametres(boutiqueId: string): Promise<Record<string, unknown>> {
+  const { data } = await sb.from('parametres').select('cle,valeur').eq('boutique_id', boutiqueId);
   return Object.fromEntries((data ?? []).map((r: { cle: string; valeur: unknown }) => [r.cle, r.valeur]));
 }
 
@@ -81,40 +97,43 @@ function messageRelance(tpl: string, nom: string, montant: string, numeros: stri
   return tpl.replaceAll('{nom}', nom).replaceAll('{montant}', montant).replaceAll('{numero}', numeros);
 }
 
-// Rappel quotidien : clients à crédit depuis au moins 1 jour + résumé pour la gérante
+// Rappel quotidien, boutique par boutique : clients à crédit depuis au moins 1 jour + résumé pour les gérants
 async function rappels(): Promise<number> {
-  const P = await parametres();
-  const devise = String(P.devise || 'FCFA');
-  const tpl = String(P.message_relance || 'Bonjour {nom}, petit rappel : il reste {montant} à régler chez Noecy Market.');
-  const { data: credits } = await sb.from('commandes')
-    .select('numero,client_id,client_nom,total,montant_paye,rendu,confirmed_at').eq('statut', 'credit');
-  const hier = Date.now() - 864e5;
-  const parClient: Record<string, { nom: string; du: number; nums: string[] }> = {};
-  let totalDu = 0;
-  for (const c of credits ?? []) {
-    const r = resteDu(c);
-    totalDu += r;
-    if (!c.client_id || !r || new Date(c.confirmed_at ?? 0).getTime() > hier) continue;
-    const g = (parClient[c.client_id] ??= { nom: c.client_nom, du: 0, nums: [] });
-    g.du += r; g.nums.push(c.numero);
-  }
+  const { data: bqs } = await sb.from('boutiques').select('id,nom').eq('statut', 'active');
   let n = 0;
-  for (const [id, g] of Object.entries(parClient)) {
-    n += await envoyer(await abonnesClient(id), {
-      titre: 'Rappel Noecy Market', tag: 'rappel', url: '/',
-      corps: messageRelance(tpl, g.nom, `${fmt(g.du)} ${devise}`, g.nums.join(', ')),
-    });
-  }
   const jour = new Date().toISOString().slice(0, 10);
-  const { count: resas } = await sb.from('commandes').select('id', { count: 'exact', head: true })
-    .in('statut', ['en_attente', 'reservee']).eq('date_reservation', jour);
-  const { count: attente } = await sb.from('commandes').select('id', { count: 'exact', head: true }).eq('statut', 'en_attente');
-  const morceaux = [];
-  if (resas) morceaux.push(`${resas} réservation(s) aujourd'hui`);
-  if (attente) morceaux.push(`${attente} commande(s) en attente`);
-  if (totalDu) morceaux.push(`${fmt(totalDu)} ${devise} de crédits à recouvrer`);
-  if (morceaux.length) {
-    n += await envoyer(await abonnesAdmins(), { titre: 'Bonjour Noecy', corps: morceaux.join(' · '), url: '/admin.html', tag: 'resume' });
+  for (const bq of bqs ?? []) {
+    const P = await parametres(bq.id);
+    const devise = String(P.devise || 'FCFA');
+    const tpl = String(P.message_relance || `Bonjour {nom}, petit rappel de ${bq.nom} : il reste {montant} à régler.`);
+    const { data: credits } = await sb.from('commandes')
+      .select('numero,client_id,client_nom,total,montant_paye,rendu,confirmed_at').eq('boutique_id', bq.id).eq('statut', 'credit').is('vendeur_id', null);
+    const hier = Date.now() - 864e5;
+    const parClient: Record<string, { nom: string; du: number; nums: string[] }> = {};
+    let totalDu = 0;
+    for (const c of credits ?? []) {
+      const r = resteDu(c);
+      totalDu += r;
+      if (!c.client_id || !r || new Date(c.confirmed_at ?? 0).getTime() > hier) continue;
+      const g = (parClient[c.client_id] ??= { nom: c.client_nom, du: 0, nums: [] });
+      g.du += r; g.nums.push(c.numero);
+    }
+    for (const [id, g] of Object.entries(parClient)) {
+      n += await envoyer(await abonnesClient(id), {
+        titre: `Rappel ${bq.nom}`, tag: 'rappel', url: '/',
+        corps: messageRelance(tpl, g.nom, `${fmt(g.du)} ${devise}`, g.nums.join(', ')),
+      });
+    }
+    const { count: resas } = await sb.from('commandes').select('id', { count: 'exact', head: true })
+      .eq('boutique_id', bq.id).in('statut', ['en_attente', 'reservee']).eq('date_reservation', jour);
+    const { count: attente } = await sb.from('commandes').select('id', { count: 'exact', head: true }).eq('boutique_id', bq.id).eq('statut', 'en_attente');
+    const morceaux = [];
+    if (resas) morceaux.push(`${resas} réservation(s) aujourd'hui`);
+    if (attente) morceaux.push(`${attente} commande(s) en attente`);
+    if (totalDu) morceaux.push(`${fmt(totalDu)} ${devise} de crédits à recouvrer`);
+    if (morceaux.length) {
+      n += await envoyer(await abonnesAdmins(bq.id), { titre: `Bonjour · ${bq.nom}`, corps: morceaux.join(' · '), url: '/admin.html', tag: 'resume-' + bq.id });
+    }
   }
   return n;
 }
@@ -125,14 +144,39 @@ Deno.serve(async (req) => {
     const p = await req.json();
     const secret = env('NOECY_PUSH_SECRET');
     const depuisBase = !!secret && req.headers.get('x-noecy-secret') === secret;
-    if (!depuisBase && !(await estGerante(req))) return json({ erreur: 'Accès refusé.' }, 401);
+    const qui = depuisBase ? null : await compte(req);
+    if (!depuisBase && !qui) return json({ erreur: 'Accès refusé.' }, 401);
+    // Un gérant ne peut viser que sa boutique (ou un client de sa boutique)
+    const autorise = async (boutiqueId?: string, clientId?: string) => {
+      if (depuisBase || qui!.super) return true;
+      if (boutiqueId) return qui!.boutiques.includes(boutiqueId);
+      if (clientId) {
+        const { data } = await sb.from('clients').select('boutique_id').eq('id', clientId).maybeSingle();
+        return !!data && qui!.boutiques.includes(data.boutique_id);
+      }
+      return false;
+    };
 
     let envoyes = 0;
-    if (p.type === 'rappels') envoyes = await rappels();
-    else if (p.type === 'test') envoyes = await envoyer(await abonnesAdmins(), { titre: 'Noecy Market', corps: 'Les notifications fonctionnent sur cet appareil.', url: '/admin.html' });
-    else if (p.cible === 'admins') envoyes = await envoyer(await abonnesAdmins(), p);
-    else if (p.cible === 'client' && p.client_id) envoyes = await envoyer(await abonnesClient(p.client_id), p);
-    else return json({ erreur: 'Requête invalide.' }, 400);
+    if (p.type === 'rappels') {
+      if (!depuisBase && !qui!.super) return json({ erreur: 'Accès refusé.' }, 403);
+      envoyes = await rappels();
+    } else if (p.type === 'test') {
+      if (!(await autorise(p.boutique_id))) return json({ erreur: 'Accès refusé.' }, 403);
+      envoyes = await envoyer(p.boutique_id ? await abonnesAdmins(p.boutique_id) : await abonnesSuper(), { titre: 'Notifications', corps: 'Les notifications fonctionnent sur cet appareil.', url: '/admin.html' });
+    } else if (p.cible === 'super') {
+      if (!depuisBase && !qui!.super) return json({ erreur: 'Accès refusé.' }, 403);
+      envoyes = await envoyer(await abonnesSuper(), p);
+    } else if (p.cible === 'admins') {
+      if (!(await autorise(p.boutique_id))) return json({ erreur: 'Accès refusé.' }, 403);
+      envoyes = await envoyer(await abonnesAdmins(p.boutique_id), p);
+    } else if (p.cible === 'boutique_clients' && p.boutique_id) {
+      if (!(await autorise(p.boutique_id))) return json({ erreur: 'Accès refusé.' }, 403);
+      envoyes = await envoyer(await abonnesBoutique(p.boutique_id), p);
+    } else if (p.cible === 'client' && p.client_id) {
+      if (!(await autorise(undefined, p.client_id))) return json({ erreur: 'Accès refusé.' }, 403);
+      envoyes = await envoyer(await abonnesClient(p.client_id), p);
+    } else return json({ erreur: 'Requête invalide.' }, 400);
 
     return json({ envoyes });
   } catch (e) {

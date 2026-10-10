@@ -1,8 +1,8 @@
 {
   "id": "./admin.html",
-  "name": "Noecy Gérante",
-  "short_name": "Gérante",
-  "description": "Espace gérante de Noecy Market",
+  "name": "Espace de gestion",
+  "short_name": "Gestion",
+  "description": "Gestion de votre boutique",
   "lang": "fr",
   "start_url": "./admin.html",
   "scope": "./",

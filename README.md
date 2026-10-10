@@ -1,11 +1,15 @@
-# Noecy Market
+# Plateforme de boutiques et restaurants
 
-Application web de gestion et de vente pour Noecy Market : jus (bissap, tomi), chips de banane, douceurs (caramel).
+Application web où plusieurs commerçants ont chacun leur boutique en ligne. **Noecy Market** est la première boutique.
 
-- **Boutique client** (`/`) : inscription (nom + téléphone) → validation par la gérante → panier → commande immédiate ou réservée pour un jour → paiement Wave, espèces, les deux, ou plus tard.
-- **Espace gérante** (`/admin.html`) : tableau de bord et alertes, commandes, clients, caisse par compte (espèces / Wave), produits, stock & achats (matières premières réutilisables), rentabilité, crédits & dettes, paramètres, notifications push.
+- **Vitrine** (`/`) : toutes les boutiques et restaurants validés, recherche, filtre par type, bouton « Créer ma boutique ».
+- **Boutique** (`/?b=noecy`, `/?b=ama-food`…) : chaque commerce a son lien, ses produits, son logo et sa couleur.
+- **Deux types** : *vente de produits* (stock, fabrication, réservations) et *restaurant* (menu du jour).
+- **Création payante** : le commerçant remplit `#/creer`, paie les frais par Wave et indique la référence ; l'administrateur vérifie le paiement et valide.
+- **Espace de gestion** (`/admin.html`) : chaque gérant gère sa boutique ; l'administrateur de la plateforme voit tout (vue d'ensemble, demandes, boutiques, réglages) et peut entrer dans n'importe quelle boutique.
+- **Espace vendeur** (`/vendeur.html`) : points de vente d'une boutique.
 
-Aucune installation : HTML + CSS + JavaScript, aucune étape de build. Installable sur l'écran d'accueil du téléphone (PWA).
+Aucune installation : HTML + CSS + JavaScript, aucune étape de build. Installable sur l'écran d'accueil du téléphone.
 
 ---
 
@@ -15,7 +19,7 @@ Lancez `python3 -m http.server` dans ce dossier puis ouvrez http://localhost:800
 
 Sans clés Supabase dans `js/config.js`, tout est enregistré dans le navigateur : parfait pour tester, mais **vos clients ne verront pas vos données depuis leur téléphone**.
 
-Code PIN de l'espace gérante en mode local : **2012** (à changer dans Paramètres).
+Mode local : administrateur de la plateforme = identifiant **admin**, mot de passe **2012** (à changer dans Paramètres).
 
 ---
 
@@ -25,12 +29,12 @@ Code PIN de l'espace gérante en mode local : **2012** (à changer dans Paramèt
 
 1. Créez un projet sur https://supabase.com (région *Europe*).
 2. **SQL Editor** → **New query** → collez `supabase/schema.sql` → **Run**.
-3. Nouvelle requête → collez `supabase/migration_v2.sql` → **Run**, puis `supabase/migration_v3_vendeurs.sql` → **Run** (caisse par compte, matières, réservations, connexion par numéro, notifications).
+3. Nouvelle requête → collez `supabase/migration_v2.sql` → **Run**, puis `supabase/migration_v3_vendeurs.sql`, puis `supabase/migration_v4_plateforme.sql` (plateforme multi-boutiques) (caisse par compte, matières, réservations, connexion par numéro, notifications).
 4. **Authentication → Users → Add user** : créez votre compte gérante (cochez *Auto Confirm User*), puis :
    ```sql
    insert into admins (email) values ('votre.email@exemple.com');
    ```
-5. Recommandé : **Authentication → Sign In / Providers → Email** → désactivez *Allow new users to sign up*.
+5. **Authentication → Sign In / Providers → Email** : laissez *Allow new users to sign up* **activé** (les futurs commerçants créent leur compte) et désactivez *Confirm email*. Un compte ne donne accès à rien tant que sa boutique n'est pas validée.
 6. **Project Settings → API** : copiez **Project URL** et la clé **anon public** dans `js/config.js`.
    > La clé *anon* est faite pour être publique : la sécurité est assurée par les règles RLS. Ne mettez **jamais** la clé `service_role` dans ce fichier.
 
@@ -65,14 +69,31 @@ L'espace gérante est à l'adresse : `https://votre-site/admin.html` (à ajouter
 
 ---
 
-## 3. Le lien de paiement Wave
+## 3. La plateforme
+
+### Créer une boutique (commerçant)
+1. Vitrine → **Créer ma boutique** : type (produits ou restaurant), nom, ville, présentation, responsable, téléphone, e-mail et mot de passe.
+2. Paiement des frais (montant et lien Wave réglés par l'administrateur), puis référence de la transaction.
+3. La demande apparaît chez l'administrateur ; le commerçant voit « En attente » dans `admin.html`.
+
+### Valider (administrateur)
+**Demandes** → vérifier le paiement dans Wave → interrupteur **Paiement reçu** → **Valider et mettre en ligne** (message WhatsApp proposé). La boutique reçoit ses réglages et catégories de départ. **Boutiques** : suspendre, réactiver, gérer. **Réglages** : nom de la plateforme, frais de création, lien Wave, WhatsApp.
+
+### Restaurant
+- **Plats & carte** : la liste des plats (non comptés en stock).
+- **Menu du jour** : choisir les plats du jour, le nombre de portions (vide = sans limite), masquer/afficher un plat, reprendre un menu précédent, préparer les jours suivants.
+- **Publier** : le menu devient visible et les clients abonnés reçoivent une notification. Un plat passe « Épuisé » automatiquement ; une commande annulée libère ses portions.
+- Les clients choisissent **sur place, à emporter ou livraison** (adresse obligatoire) et l'heure souhaitée.
+- **Commandes** : À accepter → En cuisine → Prête (le client est prévenu) → Remise et encaissée. Tableau **Préparation en cuisine** par plat et bilan du jour.
+
+## 4. Le lien de paiement Wave
 
 Dans **Wave Business** : *Encaisser* → *Partager le lien de paiement*. Collez-le dans **Paramètres → Paiement Wave**.
 Ajoutez `{montant}` pour pré-remplir le montant, par exemple `https://pay.wave.com/m/M_XXXX/c/sn/?amount={montant}`.
 
 ---
 
-## 4. Comment ça marche
+## 5. Comment ça marche
 
 ### Clients sans mot de passe
 - Inscription : nom + téléphone. Un seul compte par numéro.
@@ -110,7 +131,7 @@ Les relances WhatsApp ajoutent l'indicatif 221 (Sénégal) aux numéros à 9 chi
 
 ---
 
-## 5. Sauvegardes
+## 6. Sauvegardes
 
 **Paramètres → Sauvegarder (JSON)** télécharge toutes vos données.
 
@@ -123,10 +144,11 @@ Noecy_market/
 ├── js/config.js           ← clés Supabase + clé publique VAPID
 ├── js/db.js               ← accès aux données (local ou Supabase)
 ├── js/core.js             ← outils communs, notifications
-├── js/shop.js             ← boutique client
+├── js/vitrine.js          ← vitrine et création de boutique
+├── js/shop.js             ← boutique / restaurant (client)
 ├── js/admin*.js           ← espace gérante
 ├── js/app.js              ← routeur
 └── supabase/
-    ├── schema.sql, migration_v2.sql
+    ├── schema.sql, migration_v2.sql, migration_v3_vendeurs.sql, migration_v4_plateforme.sql
     └── functions/notifier/index.ts   ← envoi des notifications push
 ```

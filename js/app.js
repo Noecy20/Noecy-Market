@@ -1,9 +1,20 @@
 /*
- * Noecy Market — routeur et démarrage
+ * Plateforme — routeur et démarrage
+ *   index.html            → vitrine des boutiques
+ *   index.html#/creer      → demande de création de boutique
+ *   index.html?b=<slug>    → boutique (ou restaurant)
+ *   admin.html             → espace de gestion (gérants + administrateur de la plateforme)
  */
 'use strict';
 
 let CURRENT = null;
+const slugCourant = () => {
+  const p = new URLSearchParams(location.search).get('b');
+  if (p) return p;
+  // Anciens liens de connexion client sans boutique : ils concernaient Noecy Market
+  if (/[?&]c=/.test(location.hash)) return 'noecy';
+  return null;
+};
 
 // Ouvre la fiche d'un client demandée depuis le tableau de bord
 function ouvrirFicheEnAttente() {
@@ -25,14 +36,23 @@ async function route() {
     CURRENT = 'admin';
     await startAdmin();
     ouvrirFicheEnAttente();
-  } else {
-    // Un lien de connexion client relance la boutique même si elle est déjà ouverte
-    if (CURRENT === 'shop' && !/[?&]c=/.test(h)) { renderShopView(); return; }
-    stopAdmin();
-    stopShop();
-    CURRENT = 'shop';
-    await startShop();
+    return;
   }
+  const slug = slugCourant();
+  if (!slug) {
+    stopAdmin(); stopShop();
+    if (CURRENT === 'vitrine' && h.startsWith('#/creer')) { renderCreer(); return; }
+    if (CURRENT === 'vitrine') { renderVitrine(); return; }
+    CURRENT = 'vitrine';
+    await startVitrine();
+    return;
+  }
+  // Boutique : un lien de connexion client relance la boutique même si elle est déjà ouverte
+  if (CURRENT === 'shop' && SHOP.slug === slug && !/[?&]c=/.test(h)) { renderShopView(); return; }
+  stopAdmin();
+  stopShop();
+  CURRENT = 'shop';
+  await startShop(slug);
 }
 window.addEventListener('hashchange', route);
 

@@ -1,5 +1,5 @@
 /*
- * Noecy Market — espace gérante : produits, stock & achats, rentabilité
+^ * Plateforme — espace de gestion : produits, stock & achats, rentabilité
  */
 'use strict';
 
@@ -74,10 +74,11 @@ Object.assign(ACT, {
 
 function productForm(p) {
   const isNew = !p;
-  p = p || { nom: '', categorie_id: A.categories[0]?.id || '', prix: '', unite: '', description: '', photo: '', stock: 0, seuil_alerte: SETTINGS.seuil_defaut || 5, actif: true, suivi_stock: true };
+  // Restaurant : les plats ne sont pas comptés en stock (les portions se règlent dans le menu du jour)
+  p = p || { nom: '', categorie_id: A.categories[0]?.id || '', prix: '', unite: '', description: '', photo: '', stock: 0, seuil_alerte: SETTINGS.seuil_defaut || 5, actif: true, suivi_stock: !estResto() };
   let photo = p.photo || '';
   modal({
-    title: isNew ? 'Nouveau produit' : `Modifier · ${esc(p.nom)}`, size: 'wide',
+    title: isNew ? (estResto() ? 'Nouveau plat' : 'Nouveau produit') : `Modifier · ${esc(p.nom)}`, size: 'wide',
     body: `<form id="pf" autocomplete="off">
       <label class="dropzone" id="pf-dz"><div class="prev" id="pf-prev">${photo ? `<img src="${esc(photo)}" class="pv">` : ic('camera')}</div>
         <div><b>Photo du produit</b><p class="small muted">Cliquez ou glissez une image (compressée automatiquement).</p>

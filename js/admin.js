@@ -1,12 +1,13 @@
 /*
- * Noecy Market — espace gérante : base, tableau de bord, commandes, clients
+ * Plateforme — espace de gestion : connexion, boutique courante, tableau de bord, commandes, clients
  */
 'use strict';
 
 const A = {
-  ready: false, page: 'dashboard', periode: '30', poll: null, sig: '', charts: {}, v2: true, v3: true,
+  ready: false, page: 'dashboard', periode: '30', poll: null, sig: '', charts: {}, v2: true, v3: true, v4: true,
+  me: { super: false, boutiques: [] }, boutique: null, toutes: [], // compte connecté, boutique gérée, toutes les boutiques (administrateur)
   produits: [], categories: [], clients: [], commandes: [], fabrications: [], ecritures: [], matieres: [], achats: [], vendeurs: [],
-  cmdAll: [], ecrAll: [], // toutes les ventes / écritures, y compris celles des points de vente
+  cmdAll: [], ecrAll: [], menus: [], menu_items: [], // toutes les ventes / écritures, y compris celles des points de vente
   f: { cmd: 'en_attente', cli: 'en_attente', q: '', gl: '30', glType: 'tous', glCompte: 'tous', cat: 'tous', inv: 'produits' },
   seen: null,
 };
@@ -14,6 +15,8 @@ const prod = (id) => A.produits.find((p) => p.id === id);
 const client = (id) => A.clients.find((c) => c.id === id);
 const matiere = (id) => A.matieres.find((m) => m.id === id);
 const seuilOf = (p) => (p.seuil_alerte ?? SETTINGS.seuil_defaut ?? 5);
+const estResto = () => A.boutique?.type === 'restaurant';
+const LS_BQ_ADMIN = 'noecy_admin_boutique';
 
 /* ---------- Règles d'argent d'une commande ----------
  * statut : en_attente → (reservee) → payee | credit (= livrée, stock déduit) ; annulee
@@ -27,7 +30,9 @@ const reste = (c) => (isLivree(c) ? Math.max(0, (Number(c.total) || 0) - PAYE(c)
 // Argent que nous devons rendre (monnaie non rendue, commande annulée déjà payée)
 const aRendre = (c) => (c.statut === 'annulee' ? Math.max(0, PAYE(c)) : isLivree(c) ? Math.max(0, PAYE(c) - c.total) : 0);
 // Marchandise déjà payée mais pas encore remise
-const prepaye = (c) => (c.statut === 'en_attente' || c.statut === 'reservee' ? Math.max(0, PAYE(c)) : 0);
+// Commande pas encore remise au client (y compris en cuisine pour un restaurant)
+const nonRemise = (c) => ['en_attente', 'reservee', 'preparation', 'prete'].includes(c.statut);
+const prepaye = (c) => (nonRemise(c) ? Math.max(0, PAYE(c)) : 0);
 const nousDevons = (c) => aRendre(c) + prepaye(c);
 const paiementsTxt = (c) => {
   const t = {};
@@ -49,6 +54,7 @@ async function loadAll() {
       // Tables ajoutées par la migration v2 : l'app reste utilisable sans elles
       if (t === 'matieres' || t === 'achats') { A.v2 = false; return []; }
       if (t === 'vendeurs') { A.v3 = false; return []; }
+      if (t === 'menus' || t === 'menu_items') { A.v4 = false; return []; }
       throw e;
     })),
   ]);
@@ -61,6 +67,8 @@ async function loadAll() {
   A.commandes = A.cmdAll.filter((c) => !c.vendeur_id);
   A.ecritures = A.ecrAll.filter((e) => !e.vendeur_id);
   CATS = A.categories;
+  SETTINGS.nom_boutique = A.boutique?.nom || SETTINGS.nom_boutique;
+  if (A.me.super) A.toutes = await DB.toutesBoutiques().catch(() => A.toutes);
 }
 const adminSig = () => [
   A.cmdAll.map((c) => c.id + c.statut + c.montant_paye + c.rendu).join(),
@@ -69,13 +77,39 @@ const adminSig = () => [
   A.produits.map((p) => p.id + p.stock + p.prix + p.actif + p.suivi_stock).join(),
   A.matieres.map((m) => m.id + m.stock).join(),
   A.ecritures.length, A.fabrications.length, A.achats.length, A.categories.length,
+  A.menu_items.map((i) => i.id + i.reserve + i.quantite + i.visible).join(), A.menus.map((m) => m.id + m.publie).join(),
+  A.toutes.map((b) => b.id + b.statut + b.paiement_valide).join(),
 ].join('#');
+
+// Choisit la boutique gérée : la dernière ouverte, sinon la première active
+async function choisirBoutique(id = null) {
+  const actives = A.me.boutiques.filter((b) => b.statut === 'active' || A.me.super);
+  let voulu = id || localStorage.getItem(LS_BQ_ADMIN);
+  if (!actives.some((b) => b.id === voulu)) voulu = (actives.find((b) => b.statut === 'active') || actives[0])?.id;
+  if (!voulu) return false;
+  localStorage.setItem(LS_BQ_ADMIN, voulu);
+  DB.setBoutique(voulu);
+  A.boutique = await DB.boutiqueCourante();
+  return !!A.boutique;
+}
 
 async function startAdmin() {
   document.body.className = 'admin';
-  try { SETTINGS = await DB.getSettings(); } catch (e) { /* hors ligne */ }
-  if (!(await DB.isAdmin())) return renderLogin();
-  try { await loadAll(); } catch (e) { toast(e.message, 'err'); return renderLogin(); }
+  document.body.removeAttribute('style');
+  await chargerPlateforme();
+  if (!(await DB.isLoggedIn())) return renderLogin();
+  try { A.me = await DB.mesBoutiques(); }
+  catch (e) { toast(e.message, 'err'); return renderLogin(); }
+  if (!A.me.super && !A.me.boutiques.some((b) => b.statut === 'active')) return renderAttente();
+  if (!(await choisirBoutique())) {
+    // Administrateur sans aucune boutique : seulement les pages de la plateforme
+    if (A.me.super) { A.boutique = null; if (!PAGES_PF.includes(A.page)) A.page = 'plateforme'; }
+    else return renderAttente();
+  }
+  try { if (A.boutique) await loadAll(); else A.toutes = await DB.toutesBoutiques(); }
+  catch (e) { toast(e.message, 'err'); return renderLogin(); }
+  if (!A.boutique && !PAGES_PF.includes(A.page)) A.page = 'plateforme';
+  if (estResto() && A.page === 'inventaire' && !A.matieres.length) A.page = 'menu';
   A.sig = adminSig();
   A.seen = new Set([...A.cmdAll.map((c) => c.id), ...A.clients.map((c) => c.id)]);
   A.ready = true;
@@ -87,7 +121,7 @@ async function startAdmin() {
 function stopAdmin() { clearInterval(A.poll); A.poll = null; A.ready = false; destroyCharts(); }
 
 async function adminPoll() {
-  if (!A.ready) return;
+  if (!A.ready || !A.boutique) return;
   try { await loadAll(); } catch (e) { return; }
   let news = 0;
   A.cmdAll.filter((c) => !A.seen.has(c.id) && c.vendeur_id).forEach((c) => {
@@ -112,7 +146,35 @@ async function adminPoll() {
 }
 
 async function reload() { await loadAll(); A.sig = adminSig(); A.cmdAll.forEach((c) => A.seen.add(c.id)); A.clients.forEach((c) => A.seen.add(c.id)); }
-async function refreshAfter() { await reload(); updateNav(); renderPage(false); }
+async function refreshAfter() {
+  if (A.boutique) await reload(); else A.toutes = await DB.toutesBoutiques();
+  updateNav(); renderPage(false);
+}
+
+// Changer de boutique gérée
+function choisirBoutiqueModal() {
+  const liste = (A.me.super ? (A.toutes.length ? A.toutes : A.me.boutiques) : A.me.boutiques.filter((b) => b.statut === 'active'));
+  modal({
+    title: 'Choisir une boutique',
+    body: `${liste.length > 6 ? `<label class="search field">${ic('search')}<input class="input" id="bq-q" placeholder="Rechercher…"></label>` : ''}
+      <div class="bq-liste" id="bq-liste">${liste.map((b) => `<button class="bq-item ${A.boutique?.id === b.id ? 'on' : ''}" data-bq="${esc(b.id)}" data-n="${esc(norm(b.nom))}">
+        ${logoBoutique(b)}<span style="flex:1;min-width:0;text-align:left"><b>${esc(b.nom)}</b><small class="muted">${b.type === 'restaurant' ? 'Restaurant' : 'Boutique'}${b.statut !== 'active' ? ' · ' + esc(b.statut) : ''}</small></span>${A.boutique?.id === b.id ? ic('check') : ''}</button>`).join('')}</div>`,
+    onMount: (el, close) => {
+      const q = $('#bq-q', el); if (q) q.oninput = () => $$('.bq-item', el).forEach((x) => { x.style.display = x.dataset.n.includes(norm(q.value)) ? '' : 'none'; });
+      el.addEventListener('click', (e) => {
+        const b = e.target.closest('[data-bq]'); if (!b) return;
+        close();
+        run(null, async () => {
+          stopAdmin();
+          localStorage.setItem(LS_BQ_ADMIN, b.dataset.bq);
+          A.page = 'dashboard';
+          if (location.hash !== '#/admin') history.replaceState(null, '', location.pathname + location.search + '#/admin');
+          await startAdmin();
+        });
+      });
+    },
+  });
+}
 
 /* ---------- Connexion ---------- */
 async function renderLogin() {
@@ -121,42 +183,60 @@ async function renderLogin() {
     <div class="blob" style="width:340px;height:340px;background:#f6a609;right:-80px;top:-60px"></div>
     <div class="blob" style="width:300px;height:300px;background:#e0435a;left:-80px;bottom:-60px;animation-delay:-6s"></div>
     <form class="login-card" id="login-form">
-      <a class="brand" href="${urlBoutique()}"><span class="brand-logo">N</span><span class="brand-name">Noecy <b>Market</b></span></a>
-      <h2>Espace gérante</h2>
-      <p class="sub">${local ? 'Entrez votre code PIN' : 'Connectez-vous avec votre compte gérante'}</p>
-      ${local
-        ? `<div class="field"><input class="pin-input" id="l-pin" type="password" inputmode="numeric" pattern="[0-9]{4,8}" maxlength="8" placeholder="••••" required autocomplete="current-password"></div>`
-        : `<div class="field"><label>E-mail</label><input id="l-email" type="email" required autocomplete="username"></div>
-           <div class="field"><label>Mot de passe</label><input id="l-pass" type="password" required autocomplete="current-password"></div>`}
+      <a class="brand" href="${urlBoutique()}"><span class="brand-logo">${esc((PLATEFORME.nom || 'M').trim()[0])}</span><span class="brand-name">${esc(PLATEFORME.nom || 'Mon Marché')}</span></a>
+      <h2>Espace de gestion</h2>
+      <p class="sub">Gérants de boutique et administrateur de la plateforme</p>
+      <div class="field"><label>${local ? 'Identifiant ou e-mail' : 'E-mail'}</label><input id="l-email" type="${local ? 'text' : 'email'}" required autocomplete="username"></div>
+      <div class="field"><label>Mot de passe</label><input id="l-pass" type="password" required autocomplete="current-password"></div>
+      ${local ? '<p class="small muted" style="margin:-4px 0 12px">Démo locale — administrateur : <b>admin</b> / <b>2012</b></p>' : ''}
       <button class="btn primary lg block" type="submit">Se connecter ${ic('arrow-right')}</button>
-      <p class="small muted" style="text-align:center;margin-top:16px"><a href="${urlBoutique()}" style="color:var(--plum2)">Retour à la boutique</a></p>
+      <p class="small muted" style="text-align:center;margin-top:16px"><a href="${urlBoutique()}#/creer" style="color:var(--plum2)">Créer ma boutique</a> · <a href="${urlBoutique()}" style="color:var(--plum2)">Toutes les boutiques</a></p>
     </form></div>`;
   icons();
-  setTimeout(() => ($('#l-pin') || $('#l-email'))?.focus(), 300);
+  setTimeout(() => $('#l-email')?.focus(), 300);
   $('#login-form').addEventListener('submit', (e) => {
     e.preventDefault();
     const card = $('#login-form');
     run(e.submitter, async () => {
-      try {
-        if (local) {
-          const pin = $('#l-pin').value.trim();
-          if (!/^\d{4,8}$/.test(pin)) throw new Error('Le code doit contenir 4 à 8 chiffres.');
-          await DB.login(null, pin);
-        } else {
-          await DB.login($('#l-email').value.trim(), $('#l-pass').value);
-        }
-      } catch (err) {
-        card.classList.remove('shake'); void card.offsetWidth; card.classList.add('shake');
-        throw err;
-      }
+      try { await DB.login($('#l-email').value.trim(), $('#l-pass').value); }
+      catch (err) { card.classList.remove('shake'); void card.offsetWidth; card.classList.add('shake'); throw err; }
       toast('Bienvenue');
       await startAdmin();
     });
   });
 }
 
+// Compte dont la boutique n'est pas encore validée (ou refusée / suspendue)
+async function renderAttente() {
+  const moi = await DB.moi().catch(() => null);
+  const bqs = A.me.boutiques;
+  const STAT = { en_attente: ['En attente de validation', 'warn', 'hourglass'], refusee: ['Demande refusée', 'bad', 'circle-x'], suspendue: ['Boutique suspendue', 'bad', 'pause-circle'], active: ['Active', 'ok', 'badge-check'] };
+  $('#app').innerHTML = `<div class="login"><div class="login-card attente">
+    <a class="brand" href="${urlBoutique()}"><span class="brand-logo">${esc((PLATEFORME.nom || 'M').trim()[0])}</span><span class="brand-name">${esc(PLATEFORME.nom || '')}</span></a>
+    <h2>${bqs.length ? 'Votre demande' : 'Aucune boutique'}</h2>
+    <p class="sub">${esc(moi?.email || '')}</p>
+    ${bqs.length ? bqs.map((b) => { const [l, c, i] = STAT[b.statut] || [b.statut, '', 'info']; return `<div class="att-bq">
+      ${logoBoutique(b)}<div style="flex:1;min-width:0"><b>${esc(b.nom)}</b><span class="small muted">${b.type === 'restaurant' ? 'Restaurant' : 'Boutique'} · demandée le ${fDate(b.created_at)}</span>
+      <span class="pill ${c}">${ic(i)} ${l}</span>
+      ${b.statut === 'en_attente' ? `<p class="small muted">${b.paiement_valide ? 'Paiement confirmé : validation imminente.' : 'L\'administrateur vérifie votre paiement.'}</p>` : ''}
+      ${b.motif_refus ? `<p class="small" style="color:var(--danger)">Motif : ${esc(b.motif_refus)}</p>` : ''}</div></div>`; }).join('')
+      : '<p class="muted">Ce compte ne gère encore aucune boutique.</p>'}
+    <div class="btn-row" style="margin-top:16px">
+      <a class="btn primary" href="${urlBoutique()}#/creer">${ic('store')} ${bqs.length ? 'Nouvelle demande' : 'Créer ma boutique'}</a>
+      ${PLATEFORME.whatsapp ? `<a class="btn ghost" href="${waLink(PLATEFORME.whatsapp, 'Bonjour, je souhaite des nouvelles de ma demande de boutique.')}" target="_blank" rel="noopener">${ic('message-circle')} Contacter</a>` : ''}
+      <button class="btn ghost" data-act="logout">${ic('log-out')} Déconnexion</button>
+    </div>
+    <p class="small muted" style="margin-top:14px">Cette page se met à jour toute seule.</p>
+  </div></div>`;
+  icons();
+  clearInterval(A.poll);
+  A.poll = setInterval(async () => {
+    try { const me = await DB.mesBoutiques(); if (me.super || me.boutiques.some((b) => b.statut === 'active')) { clearInterval(A.poll); toast('Votre boutique est validée !'); confetti(); startAdmin(); } } catch (e) { /* ignore */ }
+  }, 20000);
+}
+
 /* ---------- Coque ---------- */
-const NAV = [
+const NAV_BASE = [
   ['dashboard', 'Tableau de bord', 'layout-dashboard'],
   ['commandes', 'Commandes', 'shopping-cart'],
   ['clients', 'Clients', 'users'],
@@ -168,24 +248,46 @@ const NAV = [
   ['pointsvente', 'Points de vente', 'store'],
   ['parametres', 'Paramètres', 'settings'],
 ];
+const NAV_PF = [
+  ['plateforme', "Vue d'ensemble", 'globe'],
+  ['demandes', 'Demandes', 'inbox'],
+  ['boutiques', 'Boutiques', 'store'],
+  ['reglages', 'Réglages', 'sliders-horizontal'],
+];
+const PAGES_PF = NAV_PF.map(([k]) => k);
+function navItems() {
+  if (!A.boutique) return [];
+  const items = NAV_BASE.map((x) => [...x]);
+  if (estResto()) {
+    items.splice(1, 0, ['menu', 'Menu du jour', 'utensils-crossed']);
+    const inv = items.find((x) => x[0] === 'inventaire'); if (inv) inv[1] = 'Ingrédients & achats';
+    const pr = items.find((x) => x[0] === 'produits'); if (pr) pr[1] = 'Plats & carte';
+  }
+  return items;
+}
 
 function navBadges() {
   return {
     commandes: [A.commandes.filter((c) => c.statut === 'en_attente').length, ''],
     clients: [A.clients.filter((c) => c.statut === 'en_attente').length, ''],
     relances: [A.commandes.filter((c) => c.statut === 'credit' || nousDevons(c) > 0).length, 'red'],
-    inventaire: [A.produits.filter((p) => p.actif && suivi(p) && p.stock <= seuilOf(p)).length + A.matieres.filter((m) => m.seuil > 0 && m.stock <= m.seuil).length, 'red'],
+    inventaire: [(estResto() ? 0 : A.produits.filter((p) => p.actif && suivi(p) && p.stock <= seuilOf(p)).length) + A.matieres.filter((m) => m.seuil > 0 && m.stock <= m.seuil).length, 'red'],
+    menu: [estResto() && !A.menus.some((m) => m.date === dayKey() && m.publie) ? 1 : 0, 'red'],
+    demandes: [A.toutes.filter((b) => b.statut === 'en_attente').length, ''],
   };
 }
 
 function renderShell() {
   $('#app').innerHTML = `<div class="adm">
     <aside class="side" id="side">
-      <div class="side-brand"><span class="brand-logo">N</span><div><span class="brand-name">Noecy <b>Market</b></span><small>Espace gérante</small></div></div>
+      ${A.boutique ? `<button class="bq-switch" data-act="bq-choisir" title="Changer de boutique">
+        ${logoBoutique(A.boutique)}<span class="bq-sw-txt"><b>${esc(A.boutique.nom)}</b><small>${estResto() ? 'Restaurant' : 'Boutique'}${A.boutique.statut !== 'active' ? ' · ' + esc(A.boutique.statut) : ''}</small></span>
+        ${A.me.super || A.me.boutiques.filter((b) => b.statut === 'active').length > 1 ? ic('chevrons-up-down') : ''}</button>`
+      : `<div class="side-brand"><span class="brand-logo">${esc((PLATEFORME.nom || 'M').trim()[0])}</span><div><span class="brand-name">${esc(PLATEFORME.nom || '')}</span><small>Administration</small></div></div>`}
       <nav class="nav" id="nav"></nav>
       <div class="side-foot">
         <div class="mode-pill ${DB.mode === 'local' ? '' : 'cloud'}"><i class="d"></i>${DB.mode === 'local' ? 'Mode local (démo)' : 'En ligne · Supabase'}</div>
-        <a href="${urlBoutique()}" target="_blank" rel="noopener">${ic('store')} Voir la boutique</a>
+        ${A.boutique ? `<a href="${esc(lienBoutique(A.boutique.slug))}" target="_blank" rel="noopener">${ic('store')} Voir ${estResto() ? 'le restaurant' : 'la boutique'}</a>` : ''}
         <button data-act="logout">${ic('log-out')} Déconnexion</button>
       </div>
     </aside>
@@ -196,7 +298,7 @@ function renderShell() {
         <h2 id="page-title"></h2>
         <div class="tr">
           <button class="icon-btn" data-act="refresh" title="Actualiser">${ic('refresh-cw')}</button>
-          <button class="btn primary" data-act="quick-sale">${ic('plus')}<span class="hide-mobile">Nouvelle vente</span></button>
+          ${A.boutique ? `<button class="btn primary" data-act="quick-sale">${ic('plus')}<span class="hide-mobile">Nouvelle vente</span></button>` : ''}
         </div>
       </header>
       <div id="page" class="page"></div>
@@ -210,19 +312,23 @@ function updateNav() {
   const b = navBadges();
   const nav = $('#nav');
   if (!nav) return;
-  nav.innerHTML = NAV.map(([k, l, i]) => {
+  const lien = ([k, l, i]) => {
     const [n, cls] = b[k] || [0, ''];
     return `<a href="#/admin/${k}" class="${A.page === k ? 'on' : ''}">${ic(i)}<span>${l}</span>${n ? `<span class="nb ${cls}">${n}</span>` : ''}</a>`;
-  }).join('');
+  };
+  nav.innerHTML = navItems().map(lien).join('')
+    + (A.me.super ? `<div class="nav-sep">${esc(PLATEFORME.nom || 'Plateforme')}</div>` + NAV_PF.map(lien).join('') : '');
   icons();
 }
 
 const PAGES = {};
 function renderPage(animate = true) {
+  if (!A.boutique && !PAGES_PF.includes(A.page)) A.page = 'plateforme';
+  if (A.boutique && A.page === 'menu' && !estResto()) A.page = 'dashboard';
   const P = PAGES[A.page] || PAGES.dashboard;
   destroyCharts();
   $('#page-title').textContent = P.title;
-  document.title = `${P.title} · Noecy Market`;
+  document.title = `${P.title} · ${A.boutique && !PAGES_PF.includes(A.page) ? A.boutique.nom : PLATEFORME.nom || ''}`;
   const el = $('#page');
   const y = scrollY;
   const banner = A.v2 ? '' : `<div class="note-box" style="margin-bottom:16px">${ic('database')}<div><b>Mise à jour de la base requise.</b> Exécutez le fichier <code>supabase/migration_v2.sql</code> dans Supabase (SQL Editor) pour activer la caisse par compte, les matières premières, les réservations et les notifications.</div></div>`;
@@ -244,6 +350,7 @@ Object.assign(ACT, {
     if (location.hash === '#/admin') route(); else location.hash = '#/admin';
   },
   'refresh': (el) => run(el, async () => { await refreshAfter(); toast('Données à jour'); }),
+  'bq-choisir': () => choisirBoutiqueModal(),
   'goto': (el) => {
     const d = el.dataset;
     if (d.f) A.f.cmd = d.f;
@@ -420,9 +527,19 @@ function alertesMasquees() {
 
 function computeAlerts() {
   const out = [];
+  if (estResto()) {
+    const t = dayKey(), m = A.menus.find((x) => x.date === t);
+    if (!m || !m.publie) out.push({ k: 'menu-' + t, lvl: 'danger', icon: 'utensils-crossed', txt: m ? "Le menu d'aujourd'hui est prêt mais <b>pas encore publié</b>." : "Le menu d'aujourd'hui n'est pas encore créé.", page: 'menu', btn: m ? 'Publier' : 'Créer' });
+    if (m) {
+      const ep = A.menu_items.filter((i) => i.menu_id === m.id && i.visible && i.quantite !== null && i.quantite !== undefined && i.quantite - (i.reserve || 0) <= 0);
+      if (ep.length) out.push({ k: 'epuise-' + t + ep.length, lvl: 'hot', icon: 'flame', txt: `Épuisé aujourd'hui : <b>${ep.map((i) => esc(prod(i.produit_id)?.nom || '')).join(', ')}</b>. Ajoutez des portions si possible.`, page: 'menu', btn: 'Ajuster' });
+    }
+    const pretes = A.commandes.filter((c) => c.statut === 'prete').length;
+    if (pretes) out.push({ k: 'pretes' + pretes, lvl: 'ok', icon: 'bell-ring', txt: `<b>${pretes}</b> commande(s) prête(s) à remettre.`, page: 'commandes', f: 'prete', btn: 'Voir' });
+  }
   const since7 = new Date(); since7.setDate(since7.getDate() - 7);
   const sold7 = soldSince(since7);
-  A.produits.filter((p) => p.actif && suivi(p)).forEach((p) => {
+  A.produits.filter((p) => p.actif && suivi(p) && !estResto()).forEach((p) => {
     const v = (sold7[p.id] || 0) / 7;
     if (p.stock <= 0) out.push({ k: 'rupture-' + p.id, lvl: 'danger', icon: 'package-x', txt: `<b>${esc(p.nom)}</b> est en rupture de stock.`, page: 'inventaire', btn: 'Fabriquer' });
     else if (v > 0 && p.stock / v <= 3) out.push({ k: 'vite-' + p.id, lvl: 'hot', icon: 'flame', txt: `<b>${esc(p.nom)}</b> part vite : ${num(sold7[p.id])} vendu(s) en 7 jours, plus que <b>${p.stock}</b> en stock (≈ ${Math.max(1, Math.round(p.stock / v))} jour(s)).`, page: 'inventaire', btn: 'Réapprovisionner' });
@@ -503,7 +620,7 @@ PAGES.dashboard = {
     const h = new Date().getHours();
     return `
     <div class="page-head">
-      <div><h1>${h < 12 ? 'Bonjour' : h < 18 ? 'Bon après-midi' : 'Bonsoir'} Noecy</h1><p class="muted">Voici l'état de votre boutique — ${new Date().toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' })}</p></div>
+      <div><h1>${h < 12 ? 'Bonjour' : h < 18 ? 'Bon après-midi' : 'Bonsoir'}</h1><p class="muted">Voici l'état de votre boutique — ${new Date().toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' })}</p></div>
       <div class="seg">${[['7', '7 jours'], ['30', '30 jours'], ['mois', 'Ce mois'], ['tout', 'Tout']].map(([k, l]) => `<button class="${A.periode === k ? 'on' : ''}" data-act="periode" data-p="${k}">${l}</button>`).join('')}</div>
     </div>
     ${al.length ? `<div class="alerts">${al.map((a, i) => `<div class="alert ${a.lvl}" style="--i:${i}"><span class="ai">${ic(a.icon)}</span><span class="at">${a.txt}</span><button class="btn sm ghost" data-act="goto" data-page="${a.page}" ${a.f ? `data-f="${a.f}"` : ''}>${a.btn}</button><button class="icon-btn flat alert-x" data-act="alert-hide" data-k="${esc(a.k)}" title="Masquer pour aujourd'hui">${ic('x')}</button></div>`).join('')}</div>`
@@ -516,7 +633,9 @@ PAGES.dashboard = {
       ${kpi('Caisse', s.soldes.especes + s.soldes.wave, 'landmark', '', true, `Espèces ${money(s.soldes.especes)} · Wave ${money(s.soldes.wave)}`, 4, go('caisse', { gltype: 'tous' }))}
       ${kpi('Crédits clients', s.creances, 'hand-coins', 'danger', true, `${s.nbCredits} commande(s) à crédit`, 5, go('relances'))}
       ${kpi('Nous devons', s.devons, 'undo-2', 'caramel', true, 'Monnaie, avances, remboursements', 6, go('commandes', { f: 'devons' }))}
-      ${kpi('Valeur du stock', s.valeurStock, 'boxes', 'leaf', true, `${num(s.unitesStock)} unité(s) · panier moyen ${money(s.panier)}`, 7, go('inventaire', { inv: 'produits' }))}
+      ${estResto()
+        ? kpi("Commandes aujourd'hui", A.commandes.filter((c) => (c.menu_date || dayKey(c.created_at)) === dayKey() && c.statut !== 'annulee').length, 'utensils', 'leaf', false, `panier moyen ${money(s.panier)}`, 7, go('menu'))
+        : kpi('Valeur du stock', s.valeurStock, 'boxes', 'leaf', true, `${num(s.unitesStock)} unité(s) · panier moyen ${money(s.panier)}`, 7, go('inventaire', { inv: 'produits' }))}
     </div>
     ${championsHtml(s)}
     <div class="dash-grid">
@@ -599,7 +718,7 @@ async function ecrirePaiements(c, pays, categorie) {
 async function deliverOrder(c, pays = []) {
   await reload();
   c = A.commandes.find((x) => x.id === c.id) || c;
-  if (c.statut !== 'en_attente' && c.statut !== 'reservee') throw new Error('Cette commande a déjà été livrée ou annulée.');
+  if (!nonRemise(c)) throw new Error('Cette commande a déjà été remise ou annulée.');
   await checkStock(c.lignes);
   for (const l of c.lignes) {
     const p = prod(l.produit_id);
@@ -687,22 +806,38 @@ const CMD_TABS = [
   ['annulee', 'Annulées', (c) => c.statut === 'annulee'],
   ['toutes', 'Toutes', () => true],
 ];
+// Restaurant : les commandes passent par la cuisine
+const CMD_TABS_RESTO = [
+  ['en_attente', 'À accepter', (c) => c.statut === 'en_attente'],
+  ['preparation', 'En cuisine', (c) => c.statut === 'preparation'],
+  ['prete', 'Prêtes', (c) => c.statut === 'prete'],
+  ['credit', 'À crédit', (c) => c.statut === 'credit'],
+  ['devons', 'Nous devons', (c) => nousDevons(c) > 0],
+  ['payee', 'Remises', (c) => c.statut === 'payee'],
+  ['annulee', 'Annulées', (c) => c.statut === 'annulee'],
+  ['toutes', 'Toutes', () => true],
+];
+const MODES_LBL = { sur_place: ['Sur place', 'utensils'], emporter: ['À emporter', 'shopping-bag'], livraison: ['Livraison', 'bike'] };
 
 PAGES.commandes = {
   title: 'Commandes',
   render() {
     const q = norm(A.f.q);
-    const tab = CMD_TABS.find((t) => t[0] === A.f.cmd) || CMD_TABS[0];
-    const list = A.commandes.filter(tab[2])
+    const TABS = estResto() ? CMD_TABS_RESTO : CMD_TABS;
+    const tab = TABS.find((t) => t[0] === A.f.cmd) || TABS[0];
+    const jour = A.f.cmdJour || 'tous';
+    const parJour = (c) => !estResto() || jour === 'tous' || (c.menu_date || dayKey(c.created_at)) === (jour === 'auj' ? dayKey() : DB.addDays(dayKey(), 1));
+    const list = A.commandes.filter(tab[2]).filter(parJour)
       .filter((c) => !q || norm(c.numero + ' ' + c.client_nom).includes(q))
       .sort((a, b) => A.f.cmd === 'reservee'
         ? String(a.date_reservation || '9999').localeCompare(String(b.date_reservation || '9999'))
         : String(b.created_at).localeCompare(String(a.created_at)));
     return `
-    <div class="page-head"><div><h1>Commandes</h1><p class="muted">Le stock est déduit quand vous remettez la commande. Les avances et la monnaie non rendue sont suivies.</p></div>
+    <div class="page-head"><div><h1>Commandes</h1><p class="muted">${estResto() ? 'Acceptez les commandes, suivez la cuisine, puis remettez et encaissez.' : 'Le stock est déduit quand vous remettez la commande. Les avances et la monnaie non rendue sont suivies.'}</p></div>
       <button class="btn primary" data-act="quick-sale">${ic('plus')} Nouvelle vente</button></div>
     <div class="toolbar">
-      <div class="seg scroll">${CMD_TABS.map(([k, l, f]) => { const n = ['en_attente', 'reservee', 'credit', 'devons'].includes(k) ? A.commandes.filter(f).length : 0; return `<button class="${A.f.cmd === k ? 'on' : ''}" data-act="f-cmd" data-k="${k}">${l}${n ? `<span class="count">${n}</span>` : ''}</button>`; }).join('')}</div>
+      <div class="seg scroll">${TABS.map(([k, l, f]) => { const n = ['en_attente', 'reservee', 'preparation', 'prete', 'credit', 'devons'].includes(k) ? A.commandes.filter(f).filter(parJour).length : 0; return `<button class="${A.f.cmd === k ? 'on' : ''}" data-act="f-cmd" data-k="${k}">${l}${n ? `<span class="count">${n}</span>` : ''}</button>`; }).join('')}</div>
+      ${estResto() ? `<div class="seg">${[['auj', "Aujourd'hui"], ['dem', 'Demain'], ['tous', 'Tous les jours']].map(([k, l]) => `<button class="${jour === k ? 'on' : ''}" data-act="f-cmdjour" data-k="${k}">${l}</button>`).join('')}</div>` : ''}
       <label class="search field" style="margin:0">${ic('search')}<input class="input" placeholder="N° ou client…" data-inp="adm-q" value="${esc(A.f.q)}"></label>
     </div>
     <div class="cards">${list.length ? list.map(orderCard).join('') : `<div class="empty"><span class="big">${ic('receipt')}</span><h3>Aucune commande ici</h3></div>`}</div>`;
@@ -721,10 +856,16 @@ function orderCard(c, i) {
   const r = reste(c), dv = nousDevons(c), paye = PAYE(c);
   const btn = (act, cls, icon, txt, extra = '') => `<button class="btn ${cls} sm" data-act="${act}" data-id="${id}" ${extra}>${ic(icon)} ${txt}</button>`;
   let actions = [];
-  if (c.statut === 'en_attente' || c.statut === 'reservee') {
+  if (estResto() && (c.statut === 'en_attente' || c.statut === 'preparation')) {
+    actions.push(c.statut === 'en_attente'
+      ? btn('cmd-etape', 'leaf main', 'chef-hat', 'Accepter · en cuisine', 'data-s="preparation"')
+      : btn('cmd-etape', 'mango main', 'bell-ring', 'Prête', 'data-s="prete"'));
+    actions.push(btn('cmd-livrer', 'soft', 'check', 'Remettre & encaisser'));
+    actions.push(btn('cmd-annuler', 'ghost icon-only', 'x', '', 'title="Annuler"'));
+  } else if (nonRemise(c)) {
     actions.push(btn('cmd-livrer', 'leaf main', 'check', 'Remettre & encaisser'));
     actions.push(btn('cmd-credit', 'mango', 'hand-coins', 'À crédit'));
-    actions.push(c.statut === 'en_attente' ? btn('cmd-reserver', 'soft', 'calendar-check', 'Réserver') : btn('cmd-encaisser', 'soft', 'banknote', 'Avance'));
+    actions.push(c.statut === 'en_attente' && !estResto() ? btn('cmd-reserver', 'soft', 'calendar-check', 'Réserver') : btn('cmd-encaisser', 'soft', 'banknote', 'Avance'));
     actions.push(btn('cmd-annuler', 'ghost icon-only', 'x', '', 'title="Annuler"'));
   } else if (c.statut === 'credit') {
     actions.push(btn('cmd-encaisser', 'leaf', 'banknote', 'Encaisser'));
@@ -739,7 +880,8 @@ function orderCard(c, i) {
   }
   return `<div class="order-card st-${c.statut}" style="--i:${i}">
     <div class="oc-head"><div><b>${esc(c.numero)}</b> ${pillCmd(c.statut)}</div><span class="small muted">${fDateTime(c.created_at)}</span></div>
-    ${c.date_reservation ? `<div class="resa-line">${ic('calendar-days', 'sm')} Pour le <b>${fDate(c.date_reservation)}</b>${c.heure_reservation ? ' · ' + esc(c.heure_reservation) : ''}</div>` : ''}
+    ${c.date_reservation && (!estResto() || c.date_reservation !== dayKey() || c.heure_reservation) ? `<div class="resa-line">${ic('calendar-days', 'sm')} ${estResto() && c.date_reservation === dayKey() ? "Aujourd'hui" : `Pour le <b>${fDate(c.date_reservation)}</b>`}${c.heure_reservation ? ' · ' + esc(c.heure_reservation) : ''}</div>` : ''}
+    ${c.mode_retrait ? `<div class="mode-line">${ic(MODES_LBL[c.mode_retrait]?.[1] || 'package')} <b>${MODES_LBL[c.mode_retrait]?.[0] || ''}</b>${c.adresse ? ` · ${esc(c.adresse)}` : ''}</div>` : ''}
     <div class="oc-client">${ic('user')} ${esc(c.client_nom)} ${cl?.telephone ? `<span class="small muted">· ${esc(cl.telephone)}</span>` : ''}</div>
     <ul class="oc-lines">${lines}</ul>
     ${c.note ? `<p class="small" style="color:var(--ink2)">Note : ${esc(c.note)}</p>` : ''}
@@ -813,6 +955,14 @@ function rendreModal(c) {
 const cmdById = (id) => A.commandes.find((x) => x.id === id);
 Object.assign(ACT, {
   'f-cmd': (el) => { A.f.cmd = el.dataset.k; renderPage(false); },
+  'f-cmdjour': (el) => { A.f.cmdJour = el.dataset.k; renderPage(false); },
+  // Restaurant : étape suivante de la commande (en cuisine, prête)
+  'cmd-etape': (el) => run(el, async () => {
+    const c = cmdById(el.dataset.id);
+    await DB.update('commandes', c.id, { statut: el.dataset.s });
+    toast(el.dataset.s === 'preparation' ? `${c.numero} envoyée en cuisine` : `${c.numero} prête : le client est prévenu`);
+    await refreshAfter();
+  }),
   'cmd-livrer': (el) => paiementModal(cmdById(el.dataset.id), 'livrer'),
   'cmd-reserver': (el) => paiementModal(cmdById(el.dataset.id), 'reserver'),
   'cmd-encaisser': (el) => paiementModal(cmdById(el.dataset.id), 'encaisser'),
@@ -984,7 +1134,7 @@ function remboursementModal(cl) {
   });
 }
 
-const lienConnexion = (c) => `${urlBoutique()}#/?c=${encodeURIComponent(c.id)}&t=${encodeURIComponent(c.token)}`;
+const lienConnexion = (c) => `${urlBoutique()}?b=${encodeURIComponent(A.boutique.slug)}#/?c=${encodeURIComponent(c.id)}&t=${encodeURIComponent(c.token)}`;
 
 Object.assign(ACT, {
   'f-cli': (el) => { A.f.cli = el.dataset.k; renderPage(false); },

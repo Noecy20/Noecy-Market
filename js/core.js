@@ -55,6 +55,8 @@ const compteLbl = (k) => COMPTES[k]?.label || 'Espèces';
 const STATUT_CMD = {
   en_attente: ['En attente', 'warn pulse'],
   reservee: ['Réservée', 'info'],
+  preparation: ['En cuisine', 'info pulse'],
+  prete: ['Prête', 'ok pulse'],
   payee: ['Payée', 'ok'],
   credit: ['À crédit', 'bad'],
   annulee: ['Annulée', ''],

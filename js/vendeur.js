@@ -1,6 +1,6 @@
 /*
- * Noecy Market — espace vendeur (point de vente)
- * Le vendeur vend la marchandise du stock Noecy : ses ventes et son argent sont à lui.
+ * Plateforme — espace vendeur (point de vente)
+ * Le vendeur vend la marchandise du stock de sa boutique : ses ventes et son argent sont à lui.
  */
 'use strict';
 
@@ -55,9 +55,9 @@ function renderLoginV() {
     <div class="blob" style="width:340px;height:340px;background:#1c9a69;right:-80px;top:-60px"></div>
     <div class="blob" style="width:300px;height:300px;background:#f6a609;left:-80px;bottom:-60px;animation-delay:-6s"></div>
     <form class="login-card" id="vl-form">
-      <div class="brand" style="justify-content:center"><span class="brand-logo vd-logo">N</span><span class="brand-name">Noecy <b>Vendeur</b></span></div>
+      <div class="brand" style="justify-content:center"><span class="brand-logo vd-logo">${ic('store')}</span><span class="brand-name">Espace <b>vendeur</b></span></div>
       <h2>Espace vendeur</h2>
-      <p class="sub">Connectez-vous avec votre numéro et le code donné par Noecy Market</p>
+      <p class="sub">Connectez-vous avec votre numéro et le code donné par votre boutique</p>
       <div class="field"><label>Téléphone</label><input id="vl-tel" type="tel" required autocomplete="tel" placeholder="77 123 45 67"></div>
       <div class="field"><label>Code</label><input id="vl-code" class="pin-input" type="password" inputmode="numeric" maxlength="6" required placeholder="••••" autocomplete="current-password"></div>
       <button class="btn primary lg block" type="submit">Se connecter ${ic('arrow-right')}</button>
@@ -86,7 +86,7 @@ function renderV() {
   const v = V.data.vendeur;
   $('#app').innerHTML = `<div class="vd">
     <header class="vd-top">
-      <div class="brand"><span class="brand-logo vd-logo">N</span><span class="brand-name">Noecy <b>Vendeur</b></span></div>
+      <div class="brand"><span class="brand-logo vd-logo">${esc((SETTINGS.nom_boutique || 'V').trim()[0].toUpperCase())}</span><span class="brand-name">${esc(SETTINGS.nom_boutique || '')} <b>Vendeur</b></span></div>
       <nav class="vd-tabs" id="vd-tabs"></nav>
       <div class="vd-user"><span class="avatar sm">${esc(initials(v.nom))}</span><span class="hide-sm"><b>${esc(v.nom)}</b></span>
         <button class="icon-btn flat" data-act="v-logout" title="Se déconnecter">${ic('log-out')}</button></div>
@@ -329,7 +329,7 @@ Object.assign(ACT, {
   'v-annuler': async (el) => {
     const c = V.data.ventes.find((x) => x.id === el.dataset.id);
     const paye = (c.montant_paye || 0) - (c.rendu || 0);
-    if (!(await confirmBox(`Annuler la vente <b>${esc(c.numero)}</b> ?<br><span class="small muted">Les articles retournent dans le stock Noecy${paye > 0 ? ` et ${money(paye)} sont rendus au client (sortie de votre caisse)` : ''}.</span>`, { ok: 'Annuler la vente', danger: true }))) return;
+    if (!(await confirmBox(`Annuler la vente <b>${esc(c.numero)}</b> ?<br><span class="small muted">Les articles retournent dans le stock de la boutique${paye > 0 ? ` et ${money(paye)} sont rendus au client (sortie de votre caisse)` : ''}.</span>`, { ok: 'Annuler la vente', danger: true }))) return;
     await run(null, async () => { await DB.vendeurAnnuler(V.session.id, V.session.token, c.id); toast('Vente annulée'); await chargerV(); renderPageV(false); });
   },
 });

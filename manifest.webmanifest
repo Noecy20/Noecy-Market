@@ -1,8 +1,8 @@
 {
   "id": "./",
-  "name": "Noecy Market",
-  "short_name": "Noecy",
-  "description": "Jus, chips et douceurs faits maison",
+  "name": "Mon Marché",
+  "short_name": "Marché",
+  "description": "Boutiques et restaurants",
   "lang": "fr",
   "start_url": "./",
   "scope": "./",

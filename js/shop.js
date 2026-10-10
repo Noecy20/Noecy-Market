@@ -1,20 +1,48 @@
 /*
- * Noecy Market — boutique (côté client)
+ * Plateforme — boutique ou restaurant (côté client), ouverte par ?b=<adresse>
  */
 'use strict';
 
-const LS_CLIENT = 'noecy_client';
-const LS_CART = 'noecy_cart';
 const CRENEAUX = ['Matin (8h – 12h)', 'Midi (12h – 14h)', 'Après-midi (14h – 18h)', 'Soir (18h – 21h)', 'Peu importe'];
+const CRENEAUX_RESTO = ['Dès que possible', '12h – 13h', '13h – 14h', '14h – 15h', '19h – 20h', '20h – 21h', '21h – 22h'];
+const MODES_RETRAIT = { emporter: ['À emporter', 'shopping-bag'], sur_place: ['Sur place', 'utensils'], livraison: ['Livraison', 'bike'] };
 const SHOP = {
   produits: [], client: null, cart: {}, filtre: 'tous', q: '', commandes: [], poll: null, sig: '',
   moyen: 'wave', quand: 'asap', dateResa: '', heureResa: CRENEAUX[0], partWave: null,
+  // boutique courante
+  boutique: null, bid: null, slug: null, resto: false, menus: [], menuDate: null, mode: 'emporter', adresse: '', heureResto: CRENEAUX_RESTO[0],
 };
+// Identifiants client et panier propres à chaque boutique
+const lsClient = () => 'noecy_client_' + SHOP.bid;
+const lsCart = () => 'noecy_cart_' + SHOP.bid;
 
-function loadCart() { try { return JSON.parse(localStorage.getItem(LS_CART)) || {}; } catch (e) { return {}; } }
-function saveCart() { try { localStorage.setItem(LS_CART, JSON.stringify(SHOP.cart)); } catch (e) { /* ignore */ } }
-function getCreds() { try { return JSON.parse(localStorage.getItem(LS_CLIENT)); } catch (e) { return null; } }
-function setCreds(r) { localStorage.setItem(LS_CLIENT, JSON.stringify({ id: r.id, token: r.token })); }
+function loadCart() { try { return JSON.parse(localStorage.getItem(lsCart())) || {}; } catch (e) { return {}; } }
+function saveCart() { try { localStorage.setItem(lsCart(), JSON.stringify(SHOP.cart)); } catch (e) { /* ignore */ } }
+function getCreds() { try { return JSON.parse(localStorage.getItem(lsClient())); } catch (e) { return null; } }
+function setCreds(r) { localStorage.setItem(lsClient(), JSON.stringify({ id: r.id, token: r.token })); }
+
+// Restaurant : menu affiché et portions restantes d'un plat
+const menuCourant = () => SHOP.menus.find((m) => m.date === SHOP.menuDate) || null;
+const itemMenu = (pid) => (menuCourant()?.items || []).find((i) => i.produit_id === pid) || null;
+const restant = (p) => { const i = itemMenu(p.id); return i ? i.restant : 0; }; // null = sans limite
+// « Menu du jour », « Menu de demain », « Menu du lundi 12 oct. »
+const menuLibelle = (k) => (k === dayKey() ? 'Menu du jour' : k === demain() ? 'Menu de demain' : 'Menu du ' + toDate(k).toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'short' }));
+const jourLibelle = (k) => (k === dayKey() ? "Aujourd'hui" : k === demain() ? 'Demain' : toDate(k).toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'short' }));
+
+function appliquerTheme(b) {
+  const c = b.couleur || '#6d1b4f';
+  const st = document.body.style;
+  st.setProperty('--plum2', c);
+  st.setProperty('--plum', `color-mix(in srgb, ${c} 72%, #000)`);
+  st.setProperty('--plum-soft', `color-mix(in srgb, ${c} 10%, #fff)`);
+  st.setProperty('--grad', `linear-gradient(135deg, color-mix(in srgb, ${c} 75%, #000) 0%, ${c} 50%, #f08a2c 100%)`);
+  st.setProperty('--hero', `linear-gradient(135deg, color-mix(in srgb, ${c} 28%, #12060f) 0%, color-mix(in srgb, ${c} 65%, #12060f) 55%, ${c} 100%)`);
+}
+const brandHtml = () => {
+  const b = SHOP.boutique;
+  const logo = b.logo ? `<span class="brand-logo"><img src="${esc(b.logo)}" alt=""></span>` : `<span class="brand-logo">${esc(b.nom.trim()[0].toUpperCase())}</span>`;
+  return `<a class="brand" href="#/">${logo}<span class="brand-name">${esc(b.nom)}</span></a>`;
+};
 const prodS = (id) => SHOP.produits.find((p) => p.id === id);
 const demain = () => { const d = new Date(); d.setDate(d.getDate() + 1); return dayKey(d); };
 
@@ -23,18 +51,49 @@ function lireLienConnexion() {
   const m = location.hash.match(/[?&]c=([^&]+)&t=([^&]+)/);
   if (!m) return false;
   setCreds({ id: decodeURIComponent(m[1]), token: decodeURIComponent(m[2]) });
-  history.replaceState(null, '', location.pathname + '#/');
+  history.replaceState(null, '', `${location.pathname}?b=${encodeURIComponent(SHOP.slug)}#/`);
   return true;
 }
 
-async function startShop() {
+function pageBoutiqueIndispo(titre, texte) {
+  $('#app').innerHTML = `<div class="empty" style="padding-top:110px"><span class="big">${ic('store')}</span><h3>${titre}</h3><p>${texte}</p>
+    <a class="btn primary" href="${urlBoutique()}" style="margin-top:16px">${ic('arrow-left')} Voir toutes les boutiques</a></div>`;
+  icons();
+}
+
+async function chargerMenus() {
+  if (!SHOP.resto) return;
+  SHOP.menus = (await DB.menusAVenir(SHOP.bid)).filter(Boolean);
+  if (!SHOP.menus.some((m) => m.date === SHOP.menuDate)) SHOP.menuDate = SHOP.menus[0]?.date || dayKey();
+}
+
+async function startShop(slug) {
   document.body.className = 'shop';
+  document.body.removeAttribute('style');
   $('#app').innerHTML = `<div class="products" style="padding-top:90px">${'<div class="skel" style="height:300px"></div>'.repeat(8)}</div>`;
+  let b = null;
+  try { b = await DB.boutiquePublique(slug); }
+  catch (e) { return pageBoutiqueIndispo('Boutique momentanément indisponible', esc(e.message)); }
+  if (!b) return pageBoutiqueIndispo('Boutique introuvable', 'Vérifiez le lien qui vous a été envoyé.');
+  if (b.statut !== 'active') return pageBoutiqueIndispo(`${esc(b.nom)} n'est pas encore ouverte`, b.statut === 'suspendue' ? 'Cette boutique est momentanément fermée.' : 'Revenez bientôt !');
+  SHOP.boutique = b; SHOP.bid = b.id; SHOP.slug = b.slug; SHOP.resto = b.type === 'restaurant';
+  DB.setBoutique(b.id);
+  appliquerTheme(b);
+  document.title = b.nom;
+  // Anciens identifiants de Noecy Market (avant la plateforme)
+  if (b.id === 'noecy') {
+    ['client', 'cart'].forEach((k) => { const v = localStorage.getItem('noecy_' + k); if (v && !localStorage.getItem(`noecy_${k}_noecy`)) localStorage.setItem(`noecy_${k}_noecy`, v); });
+  }
+  try { localStorage.setItem(LS_DERNIERE, JSON.stringify({ id: b.id, slug: b.slug, nom: b.nom })); } catch (e) { /* ignore */ }
+  // L'écran d'accueil du téléphone doit ouvrir cette boutique, pas la vitrine
+  $('#manifest')?.remove();
+  const t = $('meta[name=apple-mobile-web-app-title]'); if (t) t.content = b.nom;
   SHOP.cart = loadCart();
   const viaLien = lireLienConnexion();
   try {
     const [s, cats, prods] = await Promise.all([DB.getSettings(), DB.listCategories(), DB.listProducts()]);
-    SETTINGS = s; CATS = cats; SHOP.produits = prods;
+    SETTINGS = { ...s, nom_boutique: b.nom }; CATS = cats; SHOP.produits = prods;
+    await chargerMenus();
   } catch (e) {
     $('#app').innerHTML = `<div class="empty" style="padding-top:120px"><span class="big">${ic('cloud-off')}</span><h3>Boutique momentanément indisponible</h3><p>${esc(e.message)}</p></div>`;
     icons();
@@ -50,11 +109,12 @@ async function startShop() {
 }
 function stopShop() { clearInterval(SHOP.poll); SHOP.poll = null; }
 
-const shopSig = () => SHOP.produits.map((p) => p.id + ':' + p.stock + ':' + p.prix + ':' + p.suivi_stock).join('|');
+const shopSig = () => SHOP.produits.map((p) => p.id + ':' + p.stock + ':' + p.prix + ':' + p.suivi_stock).join('|')
+  + JSON.stringify(SHOP.menus.map((m) => [m.date, m.items.map((i) => i.produit_id + ':' + i.restant)]));
 
 function cleanCart() {
   for (const id of Object.keys(SHOP.cart)) {
-    if (!prodS(id)) delete SHOP.cart[id];
+    if (!prodS(id) || (SHOP.resto && !itemMenu(id))) delete SHOP.cart[id];
   }
   saveCart();
 }
@@ -64,7 +124,7 @@ async function refreshClient() {
   if (!cr) { SHOP.client = null; SHOP.commandes = []; return; }
   try {
     SHOP.client = await DB.getClient(cr.id, cr.token);
-    if (!SHOP.client) { localStorage.removeItem(LS_CLIENT); SHOP.commandes = []; return; }
+    if (!SHOP.client) { localStorage.removeItem(lsClient()); SHOP.commandes = []; return; }
     SHOP.client.token = cr.token;
     if (SHOP.client.statut === 'valide') SHOP.commandes = await DB.myOrders(cr.id, cr.token);
   } catch (e) { console.warn(e); }
@@ -76,7 +136,7 @@ async function shopPoll() {
   const beforeDu = SHOP.client?.du;
   const beforeOrders = SHOP.commandes.map((c) => c.id + c.statut).join();
   await refreshClient();
-  try { SHOP.produits = await DB.listProducts(); } catch (e) { return; }
+  try { SHOP.produits = await DB.listProducts(); await chargerMenus(); } catch (e) { return; }
   const after = SHOP.client?.statut;
   if (before && before !== after) {
     if (after === 'valide') { confetti(); toast('Votre nom est validé ! Vous pouvez commander', 'ok', 5000); }
@@ -95,10 +155,10 @@ async function shopPoll() {
 
 function renderShop() {
   const nom = SHOP.client?.nom?.split(' ')[0];
-  const cats = CATS.filter((c) => SHOP.produits.some((p) => p.categorie_id === c.id));
+  const cats = CATS.filter((c) => (SHOP.resto ? visibleProducts(true) : SHOP.produits).some((p) => p.categorie_id === c.id));
   $('#app').innerHTML = `
     <header class="shop-top" id="shop-top">
-      <a class="brand" href="#/"><span class="brand-logo">N</span><span class="brand-name">Noecy <b>Market</b></span></a>
+      ${brandHtml()}
       <div class="top-actions">
         <button class="icon-btn" data-act="go-profil" title="Mon profil" aria-label="Mon profil">${ic('user-round')}</button>
         <button class="cart-btn" data-act="open-cart" id="cart-btn">${ic('shopping-bag')}<span class="hide-sm">Panier</span><span class="badge" id="cart-count">0</span></button>
@@ -107,13 +167,15 @@ function renderShop() {
     <section class="hero">
       <div class="blob b1"></div><div class="blob b2"></div><div class="blob b3"></div>
       <div class="hero-inner">
-        <p class="eyebrow">Fait maison · Livré avec le sourire</p>
-        <h1>${nom ? `Bonjour <span class="hl">${esc(nom)}</span><br>` : ''}Les délices de <span class="hl">Noecy</span></h1>
-        <p class="lead">${esc(SETTINGS.slogan)}</p>
+        <p class="eyebrow">${SHOP.resto ? esc(menuLibelle(SHOP.menuDate)) : esc(SHOP.boutique.ville || 'Bienvenue')}</p>
+        <h1>${nom ? `Bonjour <span class="hl">${esc(nom)}</span><br>` : ''}${SHOP.resto ? 'Au menu chez' : 'Bienvenue chez'} <span class="hl">${esc(SHOP.boutique.nom)}</span></h1>
+        <p class="lead">${esc(SETTINGS.slogan || SHOP.boutique.description || '')}</p>
         <div id="client-status" class="status-stack"></div>
       </div>
-      <div class="hero-float" aria-hidden="true"><span>${ic('cup-soda')}</span><span>${ic('banana')}</span><span>${ic('candy')}</span><span>${ic('flower-2')}</span></div>
+      <div class="hero-float" aria-hidden="true">${(SHOP.resto ? ['utensils', 'soup', 'cup-soda', 'cake'] : [...new Set(CATS.map((c) => c.icone).filter(Boolean)), 'shopping-bag', 'sparkles', 'heart', 'star'].slice(0, 4)).map((i) => `<span>${ic(i)}</span>`).join('')}</div>
     </section>
+    ${SHOP.resto && SHOP.menus.length > 1 ? `<section class="shop-tools days-tools"><div class="chips" id="days">${SHOP.menus.map((m) => `<button class="chip day ${m.date === SHOP.menuDate ? 'on' : ''}" data-act="menu-jour" data-k="${m.date}">${ic('calendar-days')} ${esc(jourLibelle(m.date))}</button>`).join('')}</div></section>` : ''}
+    ${SHOP.resto && menuCourant()?.note ? `<p class="menu-note">${ic('info', 'sm')} ${esc(menuCourant().note)}</p>` : ''}
     <section class="shop-tools">
       <div class="chips" id="chips">
         <button class="chip ${SHOP.filtre === 'tous' ? 'on' : ''}" data-act="filtre" data-f="tous">Tout</button>
@@ -123,9 +185,9 @@ function renderShop() {
     </section>
     <section class="products" id="grid"></section>
     <footer class="shop-foot">
-      © ${new Date().getFullYear()} ${esc(SETTINGS.nom_boutique)} · fait maison
-      ${SETTINGS.whatsapp ? ` · <a href="${waLink(SETTINGS.whatsapp, 'Bonjour Noecy')}" target="_blank" rel="noopener">Nous écrire sur WhatsApp</a>` : ''}
-      · <a href="admin.html">Espace gérante</a>
+      © ${new Date().getFullYear()} ${esc(SHOP.boutique.nom)}
+      ${SETTINGS.whatsapp ? ` · <a href="${waLink(SETTINGS.whatsapp, 'Bonjour ' + SHOP.boutique.nom)}" target="_blank" rel="noopener">Nous écrire sur WhatsApp</a>` : ''}
+      · <a href="${urlBoutique()}">Toutes les boutiques</a> · <a href="admin.html">Espace gérant</a>
     </footer>
     <button class="fab-cart" id="fab-cart" data-act="open-cart"><span id="fab-txt"></span><span class="go">Voir le panier ${ic('arrow-right')}</span></button>`;
   renderStatus();
@@ -143,11 +205,11 @@ async function renderStatus() {
   if (!c) {
     cards.push(`<button class="status-card none" data-act="ask-name"><span class="si">${ic('user-round')}</span><span><b>Présentez-vous pour commander</b><small>Nouveau ou déjà client : c'est par ici.</small></span></button>`);
   } else if (c.statut === 'en_attente') {
-    cards.push(`<div class="status-card wait"><span class="si">${ic('hourglass')}</span><span><b>Merci ${esc(c.nom)} ! Vérification en cours…</b><small>Vous pourrez commander dès que Noecy aura validé votre nom.</small></span></div>`);
+    cards.push(`<div class="status-card wait"><span class="si">${ic('hourglass')}</span><span><b>Merci ${esc(c.nom)} ! Vérification en cours…</b><small>Vous pourrez commander dès que ${esc(SHOP.boutique.nom)} aura validé votre nom.</small></span></div>`);
   } else if (c.statut === 'valide') {
     cards.push(`<div class="status-card ok"><span class="si">${ic('badge-check')}</span><span><b>Compte validé</b><small>Ajoutez vos articles au panier et commandez.</small></span></div>`);
   } else {
-    cards.push(`<div class="status-card bad"><span class="si">${ic('circle-x')}</span><span><b>Demande non validée</b><small>Contactez Noecy pour plus d'informations.</small></span></div>`);
+    cards.push(`<div class="status-card bad"><span class="si">${ic('circle-x')}</span><span><b>Demande non validée</b><small>Contactez ${esc(SHOP.boutique.nom)} pour plus d'informations.</small></span></div>`);
   }
   if (c && c.du > 0) {
     const wl = waveLink(c.du);
@@ -164,8 +226,18 @@ async function renderStatus() {
   }
 }
 
-function visibleProducts() {
+function visibleProducts(tous = false) {
   const q = norm(SHOP.q);
+  if (SHOP.resto) {
+    // Restaurant : seulement les plats du menu publié pour le jour choisi
+    const ids = (menuCourant()?.items || []).map((i) => i.produit_id);
+    const liste = ids.map(prodS).filter(Boolean);
+    if (tous) return liste;
+    const dispoR = (p) => restant(p) === null || restant(p) > 0;
+    return liste.filter((p) => SHOP.filtre === 'tous' || p.categorie_id === SHOP.filtre)
+      .filter((p) => !q || norm(p.nom + ' ' + (p.description || '')).includes(q))
+      .sort((a, b) => dispoR(b) - dispoR(a));
+  }
   const dispo = (p) => !suivi(p) || p.stock > 0;
   return SHOP.produits
     .filter((p) => SHOP.filtre === 'tous' || p.categorie_id === SHOP.filtre)
@@ -175,12 +247,20 @@ function visibleProducts() {
 
 function addControl(p) {
   const q = SHOP.cart[p.id];
+  if (SHOP.resto && !q && restant(p) === 0) return `<span class="pill bad">Épuisé</span>`;
   if (q) return `<div class="stepper"><button data-act="cart-dec" data-id="${esc(p.id)}" aria-label="Moins">${ic('minus')}</button><span>${q}</span><button data-act="cart-inc" data-id="${esc(p.id)}" aria-label="Plus">${ic('plus')}</button></div>`;
   if (suivi(p) && p.stock <= 0) return `<button class="btn soft sm" data-act="cart-add" data-id="${esc(p.id)}">${ic('calendar-clock')} Réserver</button>`;
   return `<button class="add-btn" data-act="cart-add" data-id="${esc(p.id)}" aria-label="Ajouter au panier">${ic('plus')}</button>`;
 }
 
 function stockTag(p) {
+  if (SHOP.resto) {
+    const r = restant(p);
+    if (r === null) return `<span class="pill ok tag dot">Disponible</span>`;
+    if (r <= 0) return `<span class="pill bad tag">Épuisé</span>`;
+    if (r <= 5) return `<span class="pill warn tag dot pulse">Plus que ${r} portion${r > 1 ? 's' : ''} !</span>`;
+    return `<span class="pill ok tag dot">${r} portions</span>`;
+  }
   if (!suivi(p)) return `<span class="pill ok tag dot">Disponible</span>`;
   if (p.stock <= 0) return `<span class="pill warn tag">Sur réservation</span>`;
   if (p.stock <= (p.seuil_alerte ?? 5)) return `<span class="pill warn tag dot pulse">Plus que ${p.stock} !</span>`;
@@ -194,7 +274,7 @@ function renderGrid(animate = true) {
   g.innerHTML = list.length
     ? list.map((p, i) => {
       const cat = catOf(p.categorie_id);
-      return `<article class="pcard ${suivi(p) && p.stock <= 0 ? 'soldout' : ''}" style="--i:${animate ? i : 0};${animate ? '' : 'animation:none'}" data-act="view-product" data-id="${esc(p.id)}">
+      return `<article class="pcard ${(SHOP.resto ? restant(p) === 0 : suivi(p) && p.stock <= 0) ? 'soldout' : ''}" style="--i:${animate ? i : 0};${animate ? '' : 'animation:none'}" data-act="view-product" data-id="${esc(p.id)}">
         <div class="pcard-media">${prodVisual(p)}${stockTag(p)}</div>
         <div class="pcard-body">
           ${cat ? `<span class="small muted">${ic(cat.icone || 'shopping-bag', 'sm')} ${esc(cat.nom)}${p.unite ? ' · ' + esc(p.unite) : ''}</span>` : ''}
@@ -204,7 +284,9 @@ function renderGrid(animate = true) {
         </div>
       </article>`;
     }).join('')
-    : `<div class="empty"><span class="big">${ic('search-x')}</span><h3>Aucun article trouvé</h3><p>Essayez une autre catégorie ou recherche.</p></div>`;
+    : SHOP.resto && !menuCourant()
+      ? `<div class="empty"><span class="big">${ic('utensils')}</span><h3>Le menu du jour n'est pas encore publié</h3><p>${DB.pushDisponible() ? 'Activez les notifications : vous serez prévenu(e) dès qu\'il est en ligne.' : 'Revenez un peu plus tard !'}</p>${SHOP.client && DB.pushDisponible() ? `<button class="btn primary" style="margin-top:14px" data-act="client-push">${ic('bell-ring')} Me prévenir</button>` : ''}</div>`
+      : `<div class="empty"><span class="big">${ic('search-x')}</span><h3>Aucun article trouvé</h3><p>Essayez une autre catégorie ou recherche.</p></div>`;
   icons();
 }
 
@@ -217,7 +299,7 @@ function refreshControl(id) {
 const cartCount = () => Object.values(SHOP.cart).reduce((s, q) => s + q, 0);
 const cartTotal = () => Object.entries(SHOP.cart).reduce((s, [id, q]) => s + (prodS(id)?.prix || 0) * q, 0);
 // Vrai si un article compté est demandé au-delà du stock : il faut alors une date de réservation
-const cartNeedsResa = () => Object.entries(SHOP.cart).some(([id, q]) => { const p = prodS(id); return p && suivi(p) && q > p.stock; });
+const cartNeedsResa = () => !SHOP.resto && Object.entries(SHOP.cart).some(([id, q]) => { const p = prodS(id); return p && suivi(p) && q > p.stock; });
 
 function updateCartUI(bump = true) {
   const n = cartCount();
@@ -237,8 +319,8 @@ function updateCartUI(bump = true) {
 function canOrder() {
   const c = SHOP.client;
   if (!c) { askName(); return false; }
-  if (c.statut === 'en_attente') { toast('Votre nom est en cours de validation par Noecy', 'warn', 4000); return false; }
-  if (c.statut !== 'valide') { toast("Votre demande n'a pas été validée. Contactez Noecy.", 'err', 4000); return false; }
+  if (c.statut === 'en_attente') { toast(`Votre nom est en cours de validation par ${SHOP.boutique.nom}`, 'warn', 4000); return false; }
+  if (c.statut !== 'valide') { toast(`Votre demande n'a pas été validée. Contactez ${SHOP.boutique.nom}.`, 'err', 4000); return false; }
   return true;
 }
 
@@ -264,7 +346,10 @@ function setQty(id, q, fromEl) {
   if (!p) return;
   q = Math.min(99, q);
   const was = SHOP.cart[id] || 0;
-  if (q > was && suivi(p) && q > p.stock && was <= p.stock) {
+  if (SHOP.resto) {
+    const r = restant(p);
+    if (r !== null && q > r) { toast(r ? `Plus que ${r} portion(s) de ${p.nom}.` : `${p.nom} est épuisé.`, 'warn'); q = r; }
+  } else if (q > was && suivi(p) && q > p.stock && was <= p.stock) {
     toast(p.stock > 0 ? `Plus que ${p.stock} en stock : le reste sera sur réservation.` : 'Article sur réservation : choisissez une date dans le panier.', 'info', 4000);
   }
   if (q <= 0) delete SHOP.cart[id]; else SHOP.cart[id] = q;
@@ -288,6 +373,12 @@ Object.assign(ACT, {
   'open-cart': () => openCart(),
   'my-orders': () => openMyOrders(),
   'go-profil': () => { if (!SHOP.client) return askName(); location.hash = '#/profil'; },
+  'menu-jour': (el) => {
+    if (el.dataset.k === SHOP.menuDate) return;
+    if (cartCount()) toast('Panier vidé : il concernait un autre jour.', 'info');
+    SHOP.menuDate = el.dataset.k; SHOP.cart = {}; saveCart();
+    renderShop();
+  },
   'client-push': (el) => run(el, async () => {
     const sub = await subscribePush();
     await DB.savePushClient(SHOP.client.id, SHOP.client.token, sub);
@@ -296,7 +387,7 @@ Object.assign(ACT, {
   }),
   'client-logout': async () => {
     if (!(await confirmBox('Se déconnecter de ce téléphone ? Vous pourrez revenir avec votre numéro de téléphone.', { ok: 'Se déconnecter' }))) return;
-    localStorage.removeItem(LS_CLIENT);
+    localStorage.removeItem(lsClient());
     SHOP.client = null; SHOP.commandes = []; SHOP.cart = {}; saveCart();
     location.hash = '#/'; renderShop(); askName();
   },
@@ -314,7 +405,7 @@ function askName(tab = 'new') {
       <h2>Bienvenue chez ${esc(SETTINGS.nom_boutique)}</h2>
       <div class="seg gate-tabs"><button type="button" data-g="new">Je suis nouveau</button><button type="button" data-g="login">J'ai déjà un compte</button></div>
       <form id="gate-new" autocomplete="on">
-        <p>Dites-nous qui vous êtes. Noecy valide votre nom avant votre première commande.</p>
+        <p>Dites-nous qui vous êtes. ${esc(SHOP.boutique.nom)} valide votre nom avant votre première commande.</p>
         <div class="field"><label for="g-nom">Nom complet *</label><input id="g-nom" name="name" required minlength="2" maxlength="80" placeholder="Ex. Awa Diop" autocomplete="name"></div>
         <div class="field"><label for="g-tel">Téléphone *</label><input id="g-tel" name="tel" type="tel" required maxlength="30" placeholder="Ex. 77 123 45 67" autocomplete="tel">
           <span class="hint">Il vous servira à retrouver votre compte sur un autre téléphone.</span></div>
@@ -349,7 +440,7 @@ function askName(tab = 'new') {
           const nom = $('#g-nom', el).value.trim();
           if (nom.length < 2) throw new Error('Merci d\'indiquer votre nom.');
           const r = await DB.registerClient(nom, $('#g-tel', el).value.trim());
-          await done(r, 'Merci ! Votre demande est envoyée à Noecy.');
+          await done(r, `Merci ! Votre demande est envoyée à ${SHOP.boutique.nom}.`);
         });
       });
       $('#gate-login', el).addEventListener('submit', (e) => {
@@ -371,8 +462,8 @@ function viewProduct(id) {
     title: esc(p.nom),
     body: `<div class="pd-media">${prodVisual(p)}</div>
       <div class="pd-meta">${cat ? `<span class="pill info">${ic(cat.icone || 'shopping-bag', 'sm')} ${esc(cat.nom)}</span>` : ''}${p.unite ? `<span class="pill">${esc(p.unite)}</span>` : ''}${stockTag(p).replace(' tag', '')}</div>
-      <p style="color:var(--ink2);white-space:pre-line">${esc(p.description || 'Fait maison par Noecy.')}</p>
-      ${suivi(p) && p.stock <= 0 ? `<p class="note-box info small" style="margin-top:12px">${ic('calendar-clock')}<span>Plus en stock pour le moment : réservez-le pour une date, Noecy le prépare pour vous.</span></p>` : ''}`,
+      <p style="color:var(--ink2);white-space:pre-line">${esc(p.description || '')}</p>
+      ${!SHOP.resto && suivi(p) && p.stock <= 0 ? `<p class="note-box info small" style="margin-top:12px">${ic('calendar-clock')}<span>Plus en stock pour le moment : réservez-le pour une date, Noecy le prépare pour vous.</span></p>` : ''}`,
     foot: `<span class="price" style="margin-right:auto;font-size:22px">${money(p.prix)}</span><span data-ctl="${esc(p.id)}">${addControl(p)}</span>`,
   });
 }
@@ -386,6 +477,11 @@ function cartBodyHtml() {
   const total = cartTotal();
   const needResa = cartNeedsResa();
   if (needResa) SHOP.quand = 'resa';
+  const quand = SHOP.resto ? `
+    <h4 class="cart-h">${esc(menuLibelle(SHOP.menuDate))}</h4>
+    <div class="seg seg-full">${Object.entries(MODES_RETRAIT).map(([k, [l, i]]) => `<button type="button" class="${SHOP.mode === k ? 'on' : ''}" data-act="mode-retrait" data-k="${k}">${ic(i)} ${l}</button>`).join('')}</div>
+    ${SHOP.mode === 'livraison' ? `<div class="field" style="margin-top:12px"><label for="c-adresse">Adresse de livraison *</label><textarea id="c-adresse" maxlength="200" data-inp="c-adresse" placeholder="Quartier, rue, repère…">${esc(SHOP.adresse)}</textarea></div>` : ''}
+    <div class="field" style="margin-top:12px"><label for="c-heure-r">Heure souhaitée</label><select id="c-heure-r" data-inp="c-heure-r">${CRENEAUX_RESTO.map((c) => `<option ${c === SHOP.heureResto ? 'selected' : ''}>${c}</option>`).join('')}</select></div>` : null;
   if (SHOP.partWave === null || SHOP.partWave > total) SHOP.partWave = Math.round(total / 2);
   return `${lines.map(({ p, q }, i) => `<div class="cart-line" style="animation-delay:${i * 40}ms">
       <div class="thumb">${prodVisual(p)}</div>
@@ -394,7 +490,7 @@ function cartBodyHtml() {
       <div class="lt">${money(p.prix * q)}</div>
     </div>`).join('')}
 
-    <h4 class="cart-h">Pour quand ?</h4>
+    ${quand !== null ? quand : `<h4 class="cart-h">Pour quand ?</h4>
     <div class="seg seg-full">
       <button type="button" class="${SHOP.quand === 'asap' ? 'on' : ''}" data-act="quand" data-k="asap" ${needResa ? 'disabled' : ''}>${ic('zap')} Dès que possible</button>
       <button type="button" class="${SHOP.quand === 'resa' ? 'on' : ''}" data-act="quand" data-k="resa">${ic('calendar-days')} Réserver une date</button>
@@ -403,7 +499,7 @@ function cartBodyHtml() {
     <div class="row ${SHOP.quand === 'resa' ? '' : 'hidden'}" style="margin-top:12px">
       <div class="field"><label for="c-date">Jour</label><input id="c-date" type="date" min="${dayKey()}" value="${esc(SHOP.dateResa || demain())}" data-inp="c-date"></div>
       <div class="field"><label for="c-heure">Moment</label><select id="c-heure" data-inp="c-heure">${CRENEAUX.map((c) => `<option ${c === SHOP.heureResa ? 'selected' : ''}>${c}</option>`).join('')}</select></div>
-    </div>
+    </div>`}
 
     <h4 class="cart-h">Moyen de paiement</h4>
     <div class="pay-opts">
@@ -415,7 +511,7 @@ function cartBodyHtml() {
       <div class="field"><label for="c-wave">Part payée par Wave</label><input id="c-wave" type="number" min="0" max="${total}" step="50" value="${SHOP.partWave}" data-inp="c-wave"></div>
       <div class="field"><label>Part en espèces</label><input id="c-esp" class="input" value="${money(total - SHOP.partWave)}" disabled></div>
     </div>` : ''}
-    <div class="field"><label for="c-note">Note pour Noecy (facultatif)</label><textarea id="c-note" maxlength="500" placeholder="Lieu de livraison, précisions…"></textarea></div>
+    <div class="field"><label for="c-note">Note pour ${esc(SHOP.boutique.nom)} (facultatif)</label><textarea id="c-note" maxlength="500" placeholder="Lieu de livraison, précisions…"></textarea></div>
     <div class="total-row"><span class="muted">Articles</span><span>${cartCount()}</span></div>
     <div class="total-row big"><span>Total</span><span class="grad-text">${money(total)}</span></div>`;
 }
@@ -443,6 +539,8 @@ function refreshCart() {
 }
 
 INP['c-date'] = (el) => { SHOP.dateResa = el.value; };
+INP['c-adresse'] = (el) => { SHOP.adresse = el.value; };
+INP['c-heure-r'] = (el) => { SHOP.heureResto = el.value; };
 INP['c-heure'] = (el) => { SHOP.heureResa = el.value; };
 INP['c-wave'] = (el) => {
   const total = cartTotal();
@@ -454,6 +552,7 @@ Object.assign(ACT, {
   'cl-inc': (el) => { setQty(el.dataset.id, (SHOP.cart[el.dataset.id] || 0) + 1); refreshCart(); },
   'cl-dec': (el) => { setQty(el.dataset.id, (SHOP.cart[el.dataset.id] || 0) - 1); refreshCart(); },
   'pay-pick': (el) => { SHOP.moyen = el.dataset.k; refreshCart(); },
+  'mode-retrait': (el) => { SHOP.mode = el.dataset.k; refreshCart(); },
   'quand': (el) => { SHOP.quand = el.dataset.k; if (SHOP.quand === 'resa' && !SHOP.dateResa) SHOP.dateResa = demain(); refreshCart(); },
   'place-order': (el) => {
     if (!canOrder()) return;
@@ -462,7 +561,15 @@ Object.assign(ACT, {
       const note = $('#c-note')?.value || '';
       const total = cartTotal();
       const extra = {};
-      if (SHOP.quand === 'resa') {
+      if (SHOP.resto) {
+        extra.date_reservation = SHOP.menuDate;
+        extra.mode_retrait = SHOP.mode;
+        extra.heure_reservation = SHOP.heureResto;
+        if (SHOP.mode === 'livraison') {
+          extra.adresse = ($('#c-adresse')?.value || SHOP.adresse).trim();
+          if (extra.adresse.length < 3) throw new Error('Indiquez l\'adresse de livraison.');
+        }
+      } else if (SHOP.quand === 'resa') {
         extra.date_reservation = $('#c-date')?.value || SHOP.dateResa;
         extra.heure_reservation = $('#c-heure')?.value || SHOP.heureResa;
         if (!extra.date_reservation) throw new Error('Choisissez le jour de votre réservation.');
@@ -472,6 +579,7 @@ Object.assign(ACT, {
       const cmd = await DB.placeOrder(SHOP.client.id, SHOP.client.token, lignes, SHOP.moyen, note, extra);
       SHOP.cart = {}; saveCart(); SHOP.partWave = null;
       CART_MODAL?.close();
+      if (SHOP.resto) { await chargerMenus().catch(() => {}); }
       renderGrid(false); updateCartUI();
       SHOP.commandes = await DB.myOrders(SHOP.client.id, SHOP.client.token).catch(() => SHOP.commandes);
       setTimeout(() => orderSuccess(cmd), 300);
@@ -487,13 +595,13 @@ function orderSuccess(cmd) {
     title: '',
     body: `<div class="success">
       <div class="check-anim"><svg class="tick" viewBox="0 0 52 52"><path d="M14 27 l8 8 l16 -18"/></svg></div>
-      <h2>${cmd.date_reservation ? 'Réservation envoyée !' : 'Commande envoyée !'}</h2>
-      <p class="muted">N° <b>${esc(cmd.numero)}</b> · ${money(cmd.total)}${cmd.date_reservation ? ` · pour le <b>${fDate(cmd.date_reservation)}</b>` : ''}</p>
-      <p style="margin-top:10px">Noecy va confirmer très vite. Suivez le statut dans « Mon compte ».</p>
+      <h2>${SHOP.resto ? 'Commande envoyée au restaurant !' : cmd.date_reservation ? 'Réservation envoyée !' : 'Commande envoyée !'}</h2>
+      <p class="muted">N° <b>${esc(cmd.numero)}</b> · ${money(cmd.total)}${cmd.mode_retrait ? ` · ${MODES_RETRAIT[cmd.mode_retrait]?.[0] || ''}` : ''}${cmd.date_reservation && cmd.date_reservation !== dayKey() ? ` · pour le <b>${fDate(cmd.date_reservation)}</b>` : ''}</p>
+      <p style="margin-top:10px">${esc(SHOP.boutique.nom)} va confirmer très vite. Suivez le statut dans « Mon profil ».</p>
       ${partWave ? (wl
         ? `<div class="wave-box"><p>Payez maintenant avec Wave (${money(partWave)}). Indiquez <b>${esc(cmd.numero)}</b> en référence si possible.</p>
            <a class="btn wave block lg" href="${esc(wl)}" target="_blank" rel="noopener">${ic('waves')} Payer ${money(partWave)} avec Wave</a></div>`
-        : `<div class="wave-box"><p>Noecy vous enverra le lien de paiement Wave.</p></div>`) : ''}
+        : `<div class="wave-box"><p>${esc(SHOP.boutique.nom)} vous enverra le lien de paiement Wave.</p></div>`) : ''}
     </div>`,
     foot: `<button class="btn ghost" data-close data-act="go-profil">Mes commandes</button><button class="btn primary" data-close>Continuer mes achats</button>`,
   });
@@ -525,7 +633,7 @@ function openMyOrders() {
       return `<div class="my-order" style="--i:${i}">
         <div class="top"><b>${esc(o.numero)}</b>${pillCmd(o.statut)}</div>
         <span class="small muted">${fDateTime(o.created_at)} · ${PAY[o.moyen_paiement]?.label || ''}</span>
-        ${o.date_reservation ? `<div class="resa-line">${ic('calendar-days', 'sm')} Pour le ${fDate(o.date_reservation)}${o.heure_reservation ? ' · ' + esc(o.heure_reservation) : ''}</div>` : ''}
+        ${o.date_reservation ? `<div class="resa-line">${ic('calendar-days', 'sm')} Pour le ${fDate(o.date_reservation)}${o.heure_reservation ? ' · ' + esc(o.heure_reservation) : ''}${o.mode_retrait ? ' · ' + (MODES_RETRAIT[o.mode_retrait]?.[0] || '') : ''}</div>` : ''}
         <ul>${(o.lignes || []).map((l) => `<li>${l.quantite} × ${esc(l.nom)}</li>`).join('')}</ul>
         <div class="total-row"><span class="muted">Total</span><b>${money(o.total)}</b></div>
         ${paye > 0 && o.statut !== 'payee' ? `<div class="total-row"><span class="muted">Déjà payé</span><b>${money(paye)}</b></div>` : ''}
@@ -546,7 +654,7 @@ const PROFIL = { cat: 'toutes' };
 // Choisit la vue de la boutique selon l'adresse
 function renderShopView() {
   if (estProfil()) {
-    if (!SHOP.client) { history.replaceState(null, '', location.pathname + '#/'); renderShop(); askName('login'); return; }
+    if (!SHOP.client) { history.replaceState(null, '', location.pathname + location.search + '#/'); renderShop(); askName('login'); return; }
     renderProfil();
   } else renderShop();
 }
@@ -585,10 +693,10 @@ function renderProfil(animate = true) {
   const maxQ = Math.max(1, ...st.parCat.map((g) => g.q));
   const commandes = SHOP.commandes.filter((o) => PROFIL.cat === 'toutes' || (o.lignes || []).some((l) => catLigne(l).id === PROFIL.cat));
   const wl = c.du > 0 ? waveLink(c.du) : '';
-  document.title = 'Mon profil · Noecy Market';
+  document.title = `Mon profil · ${SHOP.boutique.nom}`;
   $('#app').innerHTML = `
     <header class="shop-top" id="shop-top">
-      <a class="brand" href="#/"><span class="brand-logo">N</span><span class="brand-name">Noecy <b>Market</b></span></a>
+      ${brandHtml()}
       <div class="top-actions">
         <a class="btn ghost sm" href="#/">${ic('arrow-left')} <span class="hide-sm">Boutique</span></a>
         <button class="cart-btn" data-act="open-cart" id="cart-btn">${ic('shopping-bag')}<span class="badge" id="cart-count">0</span></button>
@@ -643,7 +751,7 @@ function renderProfil(animate = true) {
           return `<div class="my-order po st-${o.statut}" style="--i:${i}">
             <div class="top"><b>${esc(o.numero)}</b>${pillCmd(o.statut)}</div>
             <span class="small muted">${fDateTime(o.created_at)} · ${PAY[o.moyen_paiement]?.label || ''}</span>
-            ${o.date_reservation ? `<div class="resa-line">${ic('calendar-days', 'sm')} Pour le ${fDate(o.date_reservation)}${o.heure_reservation ? ' · ' + esc(o.heure_reservation) : ''}</div>` : ''}
+            ${o.date_reservation ? `<div class="resa-line">${ic('calendar-days', 'sm')} Pour le ${fDate(o.date_reservation)}${o.heure_reservation ? ' · ' + esc(o.heure_reservation) : ''}${o.mode_retrait ? ' · ' + (MODES_RETRAIT[o.mode_retrait]?.[0] || '') : ''}</div>` : ''}
             <div class="po-lines">${(o.lignes || []).map((l) => { const ct = catLigne(l); const hors = PROFIL.cat !== 'toutes' && ct.id !== PROFIL.cat; return `<span class="${hors ? 'dim' : ''}" style="--c:${esc(ct.couleur || '#6d1b4f')}">${ic(ct.icone || 'shopping-bag', 'sm')} ${l.quantite} × ${esc(l.nom)}</span>`; }).join('')}</div>
             <div class="total-row"><span class="muted">Total</span><b>${money(o.total)}</b></div>
             ${o.statut === 'credit' ? `<div class="total-row"><span class="muted">Reste à payer</span><b style="color:var(--danger)">${money(reste)}</b></div>` : ''}
