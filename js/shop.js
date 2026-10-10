@@ -572,7 +572,7 @@ function statsProfil() {
     nb: cmds.length,
     total: sum(cmds, 'total'),
     articles: sum(cmds, (o) => sum(o.lignes || [], 'quantite')),
-    parCat: Object.values(parCat).sort((a, b) => b.montant - a.montant),
+    parCat: Object.values(parCat).sort((a, b) => b.q - a.q),
     premiere,
   };
 }
@@ -582,7 +582,7 @@ function renderProfil(animate = true) {
   const st = statsProfil();
   if (PROFIL.cat !== 'toutes' && !st.parCat.some((g) => g.cat.id === PROFIL.cat)) PROFIL.cat = 'toutes';
   const sel = st.parCat.find((g) => g.cat.id === PROFIL.cat);
-  const maxM = Math.max(1, ...st.parCat.map((g) => g.montant));
+  const maxQ = Math.max(1, ...st.parCat.map((g) => g.q));
   const commandes = SHOP.commandes.filter((o) => PROFIL.cat === 'toutes' || (o.lignes || []).some((l) => catLigne(l).id === PROFIL.cat));
   const wl = c.du > 0 ? waveLink(c.du) : '';
   document.title = 'Mon profil · Noecy Market';
@@ -620,8 +620,7 @@ function renderProfil(animate = true) {
         ${st.parCat.length ? `
           <div class="cat-bars">${st.parCat.map((g) => `<button class="cat-bar ${PROFIL.cat === g.cat.id ? 'on' : ''}" data-act="profil-cat" data-k="${esc(g.cat.id)}" style="--c:${esc(g.cat.couleur || '#6d1b4f')}">
             <span class="cb-ic">${ic(g.cat.icone || 'shopping-bag')}</span>
-            <span class="cb-txt"><b>${esc(g.cat.nom)}</b><small>${num(g.q)} article(s) · ${g.commandes.size} commande(s)</small><span class="bar"><i style="width:${(g.montant / maxM) * 100}%;background:var(--c)"></i></span></span>
-            <span class="cb-m">${money(g.montant)}</span></button>`).join('')}</div>
+            <span class="cb-txt"><b>${esc(g.cat.nom)}</b><small>${num(g.q)} article(s) · ${g.commandes.size} commande(s)</small><span class="bar"><i style="width:${(g.q / maxQ) * 100}%;background:var(--c)"></i></span></span></button>`).join('')}</div>
           <div class="chips" style="margin:16px 0 4px">
             <button class="chip ${PROFIL.cat === 'toutes' ? 'on' : ''}" data-act="profil-cat" data-k="toutes">Toutes</button>
             ${st.parCat.map((g) => `<button class="chip ${PROFIL.cat === g.cat.id ? 'on' : ''}" data-act="profil-cat" data-k="${esc(g.cat.id)}">${ic(g.cat.icone || 'shopping-bag')} ${esc(g.cat.nom)}</button>`).join('')}
@@ -629,7 +628,7 @@ function renderProfil(animate = true) {
           ${sel ? `<div class="prod-favs">${Object.values(sel.produits).sort((a, b) => b.q - a.q).map((p) => {
             const prd = prodS(p.id);
             return `<div class="fav"><div class="thumb">${prd ? prodVisual(prd) : `<div class="pv pv-ph" style="--c:${esc(sel.cat.couleur)}">${ic(sel.cat.icone)}</div>`}</div>
-              <div class="fav-txt"><b>${esc(p.nom)}</b><small>${num(p.q)} acheté(s) · ${money(p.montant)}</small></div>
+              <div class="fav-txt"><b>${esc(p.nom)}</b><small>${num(p.q)} acheté(s)</small></div>
               ${prd ? `<button class="btn soft sm" data-act="cart-add" data-id="${esc(p.id)}">${ic('plus')} Racheter</button>` : ''}</div>`;
           }).join('')}</div>` : ''}`
         : `<div class="empty" style="padding:30px 10px"><span class="big">${ic('shopping-bag')}</span><h3>Pas encore d'achat</h3><p>Vos achats apparaîtront ici, classés par catégorie.</p><a class="btn primary" href="#/" style="margin-top:14px">Découvrir les articles</a></div>`}
