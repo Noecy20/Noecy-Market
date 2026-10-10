@@ -52,6 +52,7 @@ create or replace function cout_moyen(p_produit text)
 returns numeric language sql stable security definer set search_path = public as $$
   select coalesce(sum(cout_total) / nullif(sum(quantite), 0), 0) from fabrications where produit_id = p_produit;
 $$;
+revoke execute on function cout_moyen(text) from public, anon, authenticated;
 
 -- ---------------------------------------------------------------------
 -- Côté vendeur
