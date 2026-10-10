@@ -2,7 +2,7 @@
 
 Application web de gestion et de vente pour Noecy Market : jus (bissap, tomi), chips de banane, douceurs (caramel).
 
-- **Boutique client** (`/`) : inscription (nom + téléphone + code secret) → validation par la gérante → panier → commande immédiate ou réservée pour un jour → paiement Wave, espèces, les deux, ou plus tard.
+- **Boutique client** (`/`) : inscription (nom + téléphone) → validation par la gérante → panier → commande immédiate ou réservée pour un jour → paiement Wave, espèces, les deux, ou plus tard.
 - **Espace gérante** (`/#/admin`) : tableau de bord et alertes, commandes, clients, caisse par compte (espèces / Wave), produits, stock & achats (matières premières réutilisables), rentabilité, crédits & dettes, paramètres, notifications push.
 
 Aucune installation : HTML + CSS + JavaScript, aucune étape de build. Installable sur l'écran d'accueil du téléphone (PWA).
@@ -25,7 +25,7 @@ Code PIN de l'espace gérante en mode local : **2012** (à changer dans Paramèt
 
 1. Créez un projet sur https://supabase.com (région *Europe*).
 2. **SQL Editor** → **New query** → collez `supabase/schema.sql` → **Run**.
-3. Nouvelle requête → collez `supabase/migration_v2.sql` → **Run** (si vous l'avez déjà exécuté avant la v2.1, exécutez aussi `supabase/migration_v2_1.sql`) (caisse par compte, matières, réservations, connexion client, notifications).
+3. Nouvelle requête → collez `supabase/migration_v2.sql` → **Run** (caisse par compte, matières, réservations, connexion par numéro, notifications).
 4. **Authentication → Users → Add user** : créez votre compte gérante (cochez *Auto Confirm User*), puis :
    ```sql
    insert into admins (email) values ('votre.email@exemple.com');
@@ -72,10 +72,10 @@ Ajoutez `{montant}` pour pré-remplir le montant, par exemple `https://pay.wave.
 ## 4. Comment ça marche
 
 ### Clients sans mot de passe
-- À l'inscription, le client choisit un **code secret** (4 à 6 chiffres).
-- Sur un autre téléphone : « J'ai déjà un compte » → numéro, puis code. Après 5 erreurs, le compte est bloqué 15 minutes.
-- Clients inscrits avant les codes (sans code) : le **numéro seul** suffit ; l'app leur propose aussitôt de créer leur code. Tant qu'ils n'en ont pas, quelqu'un qui connaît leur numéro pourrait se connecter à leur place.
-- Code oublié ou ancien client sans code : **Clients → Lien** envoie par WhatsApp un lien de connexion personnel, ou **Clients → clé** définit un nouveau code.
+- Inscription : nom + téléphone. Un seul compte par numéro.
+- Sur un autre téléphone : « J'ai déjà un compte » → numéro de téléphone, c'est tout.
+- **Clients → Lien** envoie aussi par WhatsApp un lien qui connecte directement le client.
+- À savoir : sans code, une personne qui connaît le numéro d'un client peut se connecter à sa place. La validation des nouveaux noms par la gérante reste le garde-fou.
 
 ### Commandes et argent
 

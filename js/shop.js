@@ -152,7 +152,6 @@ async function renderStatus() {
   }
   const actions = [];
   if (c && c.statut !== 'refuse' && DB.pushDisponible()) actions.push(`<button class="status-pill hidden" id="push-pill" data-act="client-push">${ic('bell-ring')} Recevoir les notifications</button>`);
-  if (c && c.statut !== 'refuse' && !c.a_code) actions.push(`<button class="status-pill" data-act="client-code">${ic('key-round')} Créer mon code secret</button>`);
   el.innerHTML = cards.join('') + (actions.length ? `<div class="status-actions">${actions.join('')}</div>` : '');
   icons();
   const pill = $('#push-pill');
@@ -291,9 +290,8 @@ Object.assign(ACT, {
     toast('Notifications activées : vous serez prévenu(e) ici, même application fermée.');
     renderStatus();
   }),
-  'client-code': () => codeForm(),
   'client-logout': async () => {
-    if (!(await confirmBox('Se déconnecter de ce téléphone ? Vous pourrez revenir avec votre numéro et votre code secret.', { ok: 'Se déconnecter' }))) return;
+    if (!(await confirmBox('Se déconnecter de ce téléphone ? Vous pourrez revenir avec votre numéro de téléphone.', { ok: 'Se déconnecter' }))) return;
     localStorage.removeItem(LS_CLIENT);
     SHOP.client = null; SHOP.commandes = []; SHOP.cart = {}; saveCart();
     renderShop(); askName();
@@ -301,7 +299,7 @@ Object.assign(ACT, {
 });
 INP['shop-q'] = debounce((el) => { SHOP.q = el.value; renderGrid(); }, 180);
 
-/* ---------- Inscription / connexion (sans mot de passe : téléphone + code) ---------- */
+/* ---------- Inscription / connexion : numéro de téléphone uniquement ---------- */
 function askName(tab = 'new') {
   if ($('.gate')) return;
   if (getCreds() && SHOP.client) return;
@@ -314,18 +312,15 @@ function askName(tab = 'new') {
       <form id="gate-new" autocomplete="on">
         <p>Dites-nous qui vous êtes. Noecy valide votre nom avant votre première commande.</p>
         <div class="field"><label for="g-nom">Nom complet *</label><input id="g-nom" name="name" required minlength="2" maxlength="80" placeholder="Ex. Awa Diop" autocomplete="name"></div>
-        <div class="field"><label for="g-tel">Téléphone *</label><input id="g-tel" name="tel" type="tel" required maxlength="30" placeholder="Ex. 77 123 45 67" autocomplete="tel"></div>
-        <div class="field"><label for="g-code">Code secret * (4 à 6 chiffres)</label><input id="g-code" class="pin-input" type="password" inputmode="numeric" pattern="[0-9]{4,6}" maxlength="6" required placeholder="••••" autocomplete="new-password">
-          <span class="hint">Il vous permettra de retrouver votre compte sur un autre téléphone.</span></div>
+        <div class="field"><label for="g-tel">Téléphone *</label><input id="g-tel" name="tel" type="tel" required maxlength="30" placeholder="Ex. 77 123 45 67" autocomplete="tel">
+          <span class="hint">Il vous servira à retrouver votre compte sur un autre téléphone.</span></div>
         <button class="btn primary lg block" type="submit">Continuer ${ic('arrow-right')}</button>
         <p class="small muted" style="margin:12px 0 0">Vous pourrez découvrir les articles pendant la validation.</p>
       </form>
       <form id="gate-login" class="hidden" autocomplete="on">
         <p>Entrez le numéro avec lequel vous vous êtes inscrit(e).</p>
         <div class="field"><label for="l-tel">Téléphone</label><input id="l-tel" type="tel" required maxlength="30" placeholder="Ex. 77 123 45 67" autocomplete="tel"></div>
-        <div class="field hidden" id="l-code-f"><label for="l-code">Code secret</label><input id="l-code" class="pin-input" type="password" inputmode="numeric" maxlength="6" placeholder="••••" autocomplete="current-password"></div>
         <button class="btn primary lg block" type="submit">Me connecter ${ic('log-in')}</button>
-        <p class="small muted" style="margin:12px 0 0">Code demandé seulement si vous en avez créé un. Code oublié ? ${SETTINGS.whatsapp ? `<a href="${waLink(SETTINGS.whatsapp, 'Bonjour Noecy, pouvez-vous m\'envoyer mon lien de connexion ?')}" target="_blank" rel="noopener" style="color:var(--plum2)">Demandez à Noecy votre lien de connexion</a>` : 'Demandez à Noecy votre lien de connexion.'}</p>
       </form>
     </div>`,
     onMount: (el, close) => {
@@ -343,61 +338,22 @@ function askName(tab = 'new') {
         close();
         renderShop();
         toast(msg);
-        // Compte sans code : on propose tout de suite d'en créer un pour protéger le compte
-        if (r.sans_code) setTimeout(() => codeForm(true), 500);
       };
-      // Changer de numéro masque à nouveau le champ code
-      $('#l-tel', el).addEventListener('input', () => { $('#l-code-f', el).classList.add('hidden'); $('#l-code', el).value = ''; });
       $('#gate-new', el).addEventListener('submit', (e) => {
         e.preventDefault();
         run(e.submitter, async () => {
           const nom = $('#g-nom', el).value.trim();
           if (nom.length < 2) throw new Error('Merci d\'indiquer votre nom.');
-          const r = await DB.registerClient(nom, $('#g-tel', el).value.trim(), $('#g-code', el).value.trim());
+          const r = await DB.registerClient(nom, $('#g-tel', el).value.trim());
           await done(r, 'Merci ! Votre demande est envoyée à Noecy.');
         });
       });
       $('#gate-login', el).addEventListener('submit', (e) => {
         e.preventDefault();
         run(e.submitter, async () => {
-          try {
-            const r = await DB.loginClient($('#l-tel', el).value.trim(), $('#l-code', el).value.trim());
-            await done(r, 'Content de vous revoir !');
-          } catch (err) {
-            if (err.codeRequis) {
-              const f = $('#l-code-f', el);
-              const first = f.classList.contains('hidden');
-              f.classList.remove('hidden');
-              $('#l-code', el).focus();
-              if (first) return; // premier passage : on affiche simplement le champ code
-            }
-            throw err;
-          }
+          const r = await DB.loginClient($('#l-tel', el).value.trim());
+          await done(r, 'Content de vous revoir !');
         });
-      });
-    },
-  });
-}
-
-function codeForm(apresConnexion = false) {
-  const c = SHOP.client;
-  if (!c) return;
-  modal({
-    title: `${ic('key-round')} ${apresConnexion ? 'Protégez votre compte' : 'Mon code secret'}`,
-    body: `<p class="muted" style="margin-bottom:14px">${apresConnexion
-      ? 'Votre compte n\'a pas encore de code : pour l\'instant, votre numéro suffit pour s\'y connecter. Choisissez un code pour que personne d\'autre ne puisse commander à votre nom.'
-      : `Avec votre numéro (${esc(c.telephone || '—')}) et ce code, vous retrouvez votre compte sur n'importe quel téléphone.`}</p>
-      <div class="field"><label>Nouveau code (4 à 6 chiffres)</label><input id="cc-1" class="pin-input" type="password" inputmode="numeric" maxlength="6" autocomplete="new-password"></div>
-      <div class="field"><label>Confirmer</label><input id="cc-2" class="pin-input" type="password" inputmode="numeric" maxlength="6" autocomplete="new-password"></div>`,
-    foot: `<button class="btn ghost" data-close>${apresConnexion ? 'Plus tard' : 'Annuler'}</button><button class="btn primary" id="cc-ok">Enregistrer</button>`,
-    onMount: (el, close) => {
-      setTimeout(() => $('#cc-1', el).focus(), 300);
-      $('#cc-ok', el).onclick = (e) => run(e.currentTarget, async () => {
-        const a = $('#cc-1', el).value.trim();
-        if (a !== $('#cc-2', el).value.trim()) throw new Error('Les deux codes ne correspondent pas.');
-        await DB.setClientCode(c.id, c.token, a);
-        c.a_code = true;
-        close(); toast('Code secret enregistré'); renderStatus();
       });
     },
   });
@@ -552,7 +508,6 @@ function openMyOrders() {
       ${c.statut === 'valide' ? '<span class="pill ok">Validé</span>' : c.statut === 'en_attente' ? '<span class="pill warn">En attente</span>' : '<span class="pill bad">Refusé</span>'}
     </div>
     <div class="account-actions">
-      <button class="btn ghost sm" data-close data-act="client-code">${ic('key-round')} ${c.a_code ? 'Changer mon code' : 'Créer mon code'}</button>
       ${DB.pushDisponible() ? `<button class="btn ghost sm" data-act="client-push">${ic('bell-ring')} Notifications</button>` : ''}
       <button class="btn ghost sm" data-close data-act="client-logout">${ic('log-out')} Changer de compte</button>
     </div>`;

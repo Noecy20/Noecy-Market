@@ -1,7 +1,7 @@
 -- =====================================================================
 -- Noecy Market — migration v2
 -- Caisse par compte, matières premières, produits en vrac, réservations,
--- paiement mixte, connexion client par téléphone + code, notifications push.
+-- paiement mixte, connexion client par numéro de téléphone, notifications push.
 --
 -- À exécuter dans Supabase > SQL Editor APRÈS schema.sql.
 -- Le script peut être relancé sans risque.
@@ -16,9 +16,6 @@ do $$ begin create extension if not exists pg_cron; exception when others then r
 -- ---------------------------------------------------------------------
 alter table produits  add column if not exists suivi_stock boolean not null default true;
 
-alter table clients   add column if not exists code_hash text;
-alter table clients   add column if not exists essais int not null default 0;
-alter table clients   add column if not exists bloque_jusqua timestamptz;
 
 alter table commandes add column if not exists date_reservation date;
 alter table commandes add column if not exists heure_reservation text;
@@ -95,29 +92,32 @@ end $$;
 -- Fonctions côté client
 -- ---------------------------------------------------------------------
 drop function if exists inscrire_client(text, text);
+drop function if exists inscrire_client(text, text, text);
+drop function if exists connexion_client(text, text);
+drop function if exists definir_code_client(text, text, text);
+drop function if exists admin_definir_code(text, text);
 
-create or replace function inscrire_client(p_nom text, p_telephone text, p_code text)
-returns json language plpgsql security definer set search_path = public, extensions as $$
+-- Inscription : nom + téléphone (un seul compte par numéro)
+create or replace function inscrire_client(p_nom text, p_telephone text)
+returns json language plpgsql security definer set search_path = public as $$
 declare c clients; v_tel text := regexp_replace(coalesce(p_telephone, ''), '\D', '', 'g');
 begin
   if length(trim(coalesce(p_nom, ''))) < 2 then raise exception 'Le nom est obligatoire.'; end if;
   if length(v_tel) < 8 then raise exception 'Le numéro de téléphone est obligatoire.'; end if;
-  if coalesce(p_code, '') !~ '^\d{4,6}$' then raise exception 'Le code secret doit contenir 4 à 6 chiffres.'; end if;
   if exists (select 1 from clients
              where statut <> 'refuse'
                and right(regexp_replace(coalesce(telephone, ''), '\D', '', 'g'), 9) = right(v_tel, 9)) then
     raise exception 'Ce numéro a déjà un compte. Utilisez « J''ai déjà un compte ».';
   end if;
-  insert into clients (nom, telephone, code_hash)
-  values (left(trim(p_nom), 80), left(trim(p_telephone), 30), crypt(p_code, gen_salt('bf')))
+  insert into clients (nom, telephone)
+  values (left(trim(p_nom), 80), left(trim(p_telephone), 30))
   returning * into c;
   return json_build_object('id', c.id, 'token', c.token);
 end $$;
 
--- Connexion depuis un autre appareil : téléphone + code secret (numéro seul si le compte n'a pas encore de code).
--- Les échecs sont renvoyés en JSON (et non en exception) pour que le compteur d'essais soit enregistré.
-create or replace function connexion_client(p_telephone text, p_code text)
-returns json language plpgsql security definer set search_path = public, extensions as $$
+-- Connexion depuis un autre appareil : numéro de téléphone uniquement
+create or replace function connexion_client(p_telephone text)
+returns json language plpgsql security definer set search_path = public as $$
 declare c clients; v_tel text := regexp_replace(coalesce(p_telephone, ''), '\D', '', 'g');
 begin
   if length(v_tel) < 8 then return json_build_object('erreur', 'Numéro de téléphone invalide.'); end if;
@@ -125,51 +125,16 @@ begin
   where statut <> 'refuse'
     and right(regexp_replace(coalesce(telephone, ''), '\D', '', 'g'), 9) = right(v_tel, 9)
   order by created_at desc limit 1;
-  if not found then return json_build_object('erreur', 'Aucun compte avec ce numéro.'); end if;
-  if c.bloque_jusqua is not null and c.bloque_jusqua > now() then
-    return json_build_object('erreur', 'Trop d''essais. Réessayez dans quelques minutes.');
+  if not found then
+    return json_build_object('erreur', 'Aucun compte avec ce numéro. Inscrivez-vous avec « Je suis nouveau ».');
   end if;
-  -- Compte inscrit avant les codes secrets : connexion avec le numéro seul (le client crée ensuite son code)
-  if c.code_hash is null then
-    return json_build_object('id', c.id, 'token', c.token, 'sans_code', true);
-  end if;
-  if coalesce(p_code, '') = '' then
-    return json_build_object('erreur', 'Entrez votre code secret.', 'code_requis', true);
-  end if;
-  if crypt(p_code, c.code_hash) <> c.code_hash then
-    update clients set
-      essais = case when essais + 1 >= 5 then 0 else essais + 1 end,
-      bloque_jusqua = case when essais + 1 >= 5 then now() + interval '15 minutes' else bloque_jusqua end
-    where id = c.id;
-    return json_build_object('erreur', 'Code incorrect.', 'code_requis', true);
-  end if;
-  update clients set essais = 0, bloque_jusqua = null where id = c.id;
   return json_build_object('id', c.id, 'token', c.token);
-end $$;
-
-create or replace function definir_code_client(p_id text, p_token text, p_code text)
-returns json language plpgsql security definer set search_path = public, extensions as $$
-begin
-  if coalesce(p_code, '') !~ '^\d{4,6}$' then return json_build_object('erreur', 'Le code secret doit contenir 4 à 6 chiffres.'); end if;
-  update clients set code_hash = crypt(p_code, gen_salt('bf')) where id = p_id and token = p_token;
-  if not found then return json_build_object('erreur', 'Client inconnu.'); end if;
-  return json_build_object('ok', true);
-end $$;
-
-create or replace function admin_definir_code(p_client_id text, p_code text)
-returns json language plpgsql security definer set search_path = public, extensions as $$
-begin
-  if not est_admin() then return json_build_object('erreur', 'Accès refusé.'); end if;
-  if coalesce(p_code, '') !~ '^\d{4,6}$' then return json_build_object('erreur', 'Le code doit contenir 4 à 6 chiffres.'); end if;
-  update clients set code_hash = crypt(p_code, gen_salt('bf')), essais = 0, bloque_jusqua = null where id = p_client_id;
-  return json_build_object('ok', true);
 end $$;
 
 create or replace function statut_client(p_id text, p_token text)
 returns json language sql stable security definer set search_path = public as $$
   select json_build_object(
     'id', c.id, 'nom', c.nom, 'telephone', c.telephone, 'statut', c.statut,
-    'a_code', c.code_hash is not null,
     'du', coalesce((select sum(greatest(o.total - (o.montant_paye - o.rendu), 0))
                     from commandes o where o.client_id = c.id and o.statut = 'credit'), 0))
   from clients c where c.id = p_id and c.token = p_token;

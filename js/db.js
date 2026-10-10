@@ -72,12 +72,6 @@
     return 'CMD-' + String(n).padStart(4, '0');
   }
 
-  // Erreur de connexion qui demande l'affichage du champ « code secret »
-  function codeRequis(msg) { const e = new Error(msg); e.codeRequis = true; return e; }
-
-  function checkCode(code) {
-    if (!/^\d{4,6}$/.test(String(code || ''))) throw new Error('Le code secret doit contenir 4 à 6 chiffres.');
-  }
 
   const LocalDB = {
     mode: 'local',
@@ -121,46 +115,21 @@
       return this.db().clients.filter((c) => c.statut !== 'refuse' && tel9(c.telephone) === t)
         .sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)))[0];
     },
-    async registerClient(nom, telephone, code) {
+    async registerClient(nom, telephone) {
       nom = (nom || '').trim();
       if (nom.length < 2) throw new Error('Le nom est obligatoire.');
       if (digits(telephone).length < 8) throw new Error('Le numéro de téléphone est obligatoire.');
-      checkCode(code);
       if (this._findTel(telephone)) throw new Error('Ce numéro a déjà un compte. Utilisez « J\'ai déjà un compte ».');
-      const c = {
-        id: uid(), token: uid(), nom, telephone: String(telephone).trim(), statut: 'en_attente', note: '',
-        code_hash: await sha256(code), essais: 0, bloque_jusqua: null, created_at: now(),
-      };
+      const c = { id: uid(), token: uid(), nom, telephone: String(telephone).trim(), statut: 'en_attente', note: '', created_at: now() };
       this.db().clients.push(c); this._save();
       return { id: c.id, token: c.token };
     },
-    async loginClient(telephone, code) {
+    // Connexion avec le numéro de téléphone uniquement
+    async loginClient(telephone) {
+      if (digits(telephone).length < 8) throw new Error('Numéro de téléphone invalide.');
       const c = this._findTel(telephone);
-      if (!c) throw new Error('Aucun compte avec ce numéro.');
-      if (c.bloque_jusqua && new Date(c.bloque_jusqua) > new Date()) throw new Error('Trop d\'essais. Réessayez dans quelques minutes.');
-      // Compte sans code (inscrit avant les codes secrets) : numéro seul
-      if (!c.code_hash) return { id: c.id, token: c.token, sans_code: true };
-      if (!code) throw codeRequis('Entrez votre code secret.');
-      if ((await sha256(code)) !== c.code_hash) {
-        c.essais = (c.essais || 0) + 1;
-        if (c.essais >= 5) { c.bloque_jusqua = new Date(Date.now() + 15 * 60000).toISOString(); c.essais = 0; }
-        this._save();
-        throw codeRequis('Code incorrect.');
-      }
-      c.essais = 0; c.bloque_jusqua = null; this._save();
+      if (!c) throw new Error('Aucun compte avec ce numéro. Inscrivez-vous avec « Je suis nouveau ».');
       return { id: c.id, token: c.token };
-    },
-    async setClientCode(id, token, code) {
-      checkCode(code);
-      const c = this.db().clients.find((x) => x.id === id && x.token === token);
-      if (!c) throw new Error('Client inconnu.');
-      c.code_hash = await sha256(code); this._save();
-    },
-    async adminSetClientCode(clientId, code) {
-      checkCode(code);
-      const c = this.db().clients.find((x) => x.id === clientId);
-      if (!c) throw new Error('Client inconnu.');
-      c.code_hash = await sha256(code); c.essais = 0; c.bloque_jusqua = null; this._save();
     },
     async getClient(id, token) {
       const db = this.db();
@@ -168,7 +137,7 @@
       if (!c) return null;
       const du = db.commandes.filter((o) => o.client_id === c.id && o.statut === 'credit')
         .reduce((s, o) => s + Math.max(0, o.total - ((o.montant_paye || 0) - (o.rendu || 0))), 0);
-      return { id: c.id, nom: c.nom, telephone: c.telephone, statut: c.statut, a_code: !!c.code_hash, du };
+      return { id: c.id, nom: c.nom, telephone: c.telephone, statut: c.statut, du };
     },
     async placeOrder(id, token, lignes, moyen, note, extra = {}) {
       const db = this.db();
@@ -293,19 +262,11 @@
     async listCategories() { return chk(await this.sb.from('categories').select('*').order('ordre')); },
     async listProducts() { return chk(await this.sb.from('produits').select('*').eq('actif', true).order('nom')); },
 
-    async registerClient(nom, telephone, code) {
-      return chkRpc(await this.sb.rpc('inscrire_client', { p_nom: nom, p_telephone: telephone || '', p_code: code || '' }));
+    async registerClient(nom, telephone) {
+      return chkRpc(await this.sb.rpc('inscrire_client', { p_nom: nom, p_telephone: telephone || '' }));
     },
-    async loginClient(telephone, code) {
-      const d = chk(await this.sb.rpc('connexion_client', { p_telephone: telephone || '', p_code: code || '' }));
-      if (d && d.erreur) throw d.code_requis ? codeRequis(d.erreur) : new Error(d.erreur);
-      return d;
-    },
-    async setClientCode(id, token, code) {
-      chkRpc(await this.sb.rpc('definir_code_client', { p_id: id, p_token: token, p_code: code }));
-    },
-    async adminSetClientCode(clientId, code) {
-      chkRpc(await this.sb.rpc('admin_definir_code', { p_client_id: clientId, p_code: code }));
+    async loginClient(telephone) {
+      return chkRpc(await this.sb.rpc('connexion_client', { p_telephone: telephone || '' }));
     },
     async getClient(id, token) {
       return chk(await this.sb.rpc('statut_client', { p_id: id, p_token: token }));

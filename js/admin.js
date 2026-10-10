@@ -58,7 +58,7 @@ async function loadAll() {
 }
 const adminSig = () => [
   A.commandes.map((c) => c.id + c.statut + c.montant_paye + c.rendu).join(),
-  A.clients.map((c) => c.id + c.statut + c.a_code).join(),
+  A.clients.map((c) => c.id + c.statut).join(),
   A.produits.map((p) => p.id + p.stock + p.prix + p.actif + p.suivi_stock).join(),
   A.matieres.map((m) => m.id + m.stock).join(),
   A.ecritures.length, A.fabrications.length, A.achats.length, A.categories.length,
@@ -884,7 +884,6 @@ function clientCard(c, i) {
     acts = `<button class="btn soft sm" data-act="cli-detail" data-id="${id}">${ic('eye')} Détails</button>
       ${st.du ? `<button class="btn leaf sm" data-act="cli-rembourser" data-id="${id}">${ic('banknote')} Remboursement</button>` : ''}
       ${c.telephone ? `<button class="btn ghost sm" data-act="cli-lien" data-id="${id}" title="Envoyer son lien de connexion">${ic('link')} Lien</button>` : ''}
-      <button class="btn ghost sm" data-act="cli-code" data-id="${id}" title="Définir son code secret">${ic('key-round')}</button>
       <button class="btn ghost sm" data-act="cli-refuser" data-id="${id}" title="Bloquer">${ic('ban')}</button>`;
   } else acts = `<button class="btn leaf sm" data-act="cli-valider" data-id="${id}">${ic('user-check')} Valider</button><button class="btn ghost sm" data-act="cli-suppr" data-id="${id}">${ic('trash-2')}</button>`;
   return `<div class="client-card" style="--i:${i}">
@@ -892,7 +891,6 @@ function clientCard(c, i) {
       ${c.statut === 'en_attente' ? '<span class="pill warn dot pulse">À valider</span>' : c.statut === 'valide' ? '<span class="pill ok">Validé</span>' : '<span class="pill bad">Refusé</span>'}</div>
     ${similaires.length ? `<div class="dup">${ic('triangle-alert')} Ressemble à : ${similaires.map((x) => esc(x.nom)).join(', ')}</div>` : ''}
     ${c.statut !== 'en_attente' ? `<div class="cstats"><div><small>Commandes</small><b>${st.n}</b></div><div><small>Total acheté</small><b>${money(st.total)}</b></div><div><small>${st.devons ? 'Nous devons' : 'Reste dû'}</small><b style="color:${st.du ? 'var(--danger)' : st.devons ? '#b05a00' : 'inherit'}">${money(st.devons || st.du)}</b></div></div>` : ''}
-    ${c.statut === 'valide' && !c.a_code ? `<div class="small muted">${ic('key-round', 'sm')} Pas encore de code secret : envoyez-lui son lien de connexion.</div>` : ''}
     <div class="oc-actions">${acts}</div>
   </div>`;
 }
@@ -942,25 +940,6 @@ Object.assign(ACT, {
     const c = client(el.dataset.id);
     const msg = `Bonjour ${c.nom}, voici votre lien de connexion à ${SETTINGS.nom_boutique} (gardez-le pour vous) :\n${lienConnexion(c)}`;
     window.open(waLink(c.telephone, msg), '_blank', 'noopener');
-  },
-  'cli-code': (el) => {
-    const c = client(el.dataset.id);
-    const propose = String(Math.floor(1000 + Math.random() * 9000));
-    modal({
-      title: `Code secret de ${esc(c.nom)}`,
-      body: `<p class="muted" style="margin-bottom:12px">Le client se connecte sur n'importe quel téléphone avec son numéro (${esc(c.telephone || '—')}) et ce code.</p>
-        <div class="field"><label>Nouveau code (4 à 6 chiffres)</label><input id="cd-code" class="pin-input" inputmode="numeric" maxlength="6" value="${propose}"></div>`,
-      foot: `<button class="btn ghost" data-close>Annuler</button><button class="btn primary" id="cd-ok">Enregistrer${c.telephone ? ' et envoyer' : ''}</button>`,
-      onMount: (m, close) => {
-        $('#cd-ok', m).onclick = (e) => run(e.currentTarget, async () => {
-          const code = $('#cd-code', m).value.trim();
-          await DB.adminSetClientCode(c.id, code);
-          close(); toast('Code enregistré');
-          if (c.telephone) window.open(waLink(c.telephone, `Bonjour ${c.nom}, votre code secret ${SETTINGS.nom_boutique} est : ${code}\nConnexion : ${location.origin}${location.pathname} → « J'ai déjà un compte ».`), '_blank', 'noopener');
-          await refreshAfter();
-        });
-      },
-    });
   },
   'cli-add': () => {
     modal({
