@@ -291,7 +291,7 @@ Object.assign(ACT, {
   }),
   'admin-push-test': (el) => run(el, async () => {
     if (!DB.pushDisponible()) {
-      if (('Notification' in window) && Notification.permission === 'granted') { await localNotify('Noecy Market', 'Les notifications du navigateur fonctionnent.', '/#/admin'); return; }
+      if (('Notification' in window) && Notification.permission === 'granted') { await localNotify('Noecy Market', 'Les notifications du navigateur fonctionnent.', '/admin.html'); return; }
       throw new Error('Activez d\'abord les notifications.');
     }
     const r = await DB.sendPush({ type: 'test' });
@@ -301,7 +301,7 @@ Object.assign(ACT, {
     if (!('Notification' in window)) throw new Error('Ce navigateur ne gère pas les notifications.');
     const p = await Notification.requestPermission();
     if (p !== 'granted') throw new Error('Notifications refusées par le navigateur.');
-    await localNotify('Noecy Market', 'Vous serez prévenue tant que l\'onglet reste ouvert.', '/#/admin');
+    await localNotify('Noecy Market', 'Vous serez prévenue tant que l\'onglet reste ouvert.', '/admin.html');
     renderPage(false);
   }),
   'settings-save': (el) => run(el, async () => {

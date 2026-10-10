@@ -3,7 +3,7 @@
 Application web de gestion et de vente pour Noecy Market : jus (bissap, tomi), chips de banane, douceurs (caramel).
 
 - **Boutique client** (`/`) : inscription (nom + téléphone) → validation par la gérante → panier → commande immédiate ou réservée pour un jour → paiement Wave, espèces, les deux, ou plus tard.
-- **Espace gérante** (`/#/admin`) : tableau de bord et alertes, commandes, clients, caisse par compte (espèces / Wave), produits, stock & achats (matières premières réutilisables), rentabilité, crédits & dettes, paramètres, notifications push.
+- **Espace gérante** (`/admin.html`) : tableau de bord et alertes, commandes, clients, caisse par compte (espèces / Wave), produits, stock & achats (matières premières réutilisables), rentabilité, crédits & dettes, paramètres, notifications push.
 
 Aucune installation : HTML + CSS + JavaScript, aucune étape de build. Installable sur l'écran d'accueil du téléphone (PWA).
 
@@ -58,7 +58,7 @@ Ce qui est notifié :
 **Netlify Drop** : glissez le dossier sur https://app.netlify.com/drop (sans les fichiers `*.local.*`).
 Ou reliez le dépôt GitHub à Netlify / Vercel / Cloudflare Pages (aucune commande de build, dossier de publication `.`).
 
-L'espace gérante est à l'adresse : `https://votre-site/#/admin`.
+L'espace gérante est à l'adresse : `https://votre-site/admin.html` (à ajouter à l'écran d'accueil du téléphone : icône sombre « Noecy Gérante », séparée de la boutique).
 
 ---
 

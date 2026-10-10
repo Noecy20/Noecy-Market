@@ -310,3 +310,6 @@ async function localNotify(titre, corps, url = '/') {
 }
 
 if ('serviceWorker' in navigator && location.protocol !== 'file:') swRegistration();
+
+// Adresse de la boutique (même depuis admin.html)
+const urlBoutique = () => location.origin + location.pathname.replace(/admin\.html$/, '').replace(/index\.html$/, '');

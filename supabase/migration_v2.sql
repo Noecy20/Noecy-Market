@@ -242,7 +242,7 @@ begin
   if tg_op = 'INSERT' then
     if not est_admin() then
       perform notifier(jsonb_build_object(
-        'cible', 'admins', 'tag', 'cmd-' || new.id, 'url', '/#/admin/commandes',
+        'cible', 'admins', 'tag', 'cmd-' || new.id, 'url', '/admin.html#/admin/commandes',
         'titre', 'Nouvelle commande ' || new.numero,
         'corps', new.client_nom || ' · ' || montant_txt(new.total)
                  || case when new.date_reservation is not null
@@ -277,7 +277,7 @@ language plpgsql security definer set search_path = public as $$
 begin
   if tg_op = 'INSERT' then
     if not est_admin() then
-      perform notifier(jsonb_build_object('cible', 'admins', 'url', '/#/admin/clients', 'tag', 'cli-' || new.id,
+      perform notifier(jsonb_build_object('cible', 'admins', 'url', '/admin.html#/admin/clients', 'tag', 'cli-' || new.id,
         'titre', 'Nouveau client à valider', 'corps', new.nom || coalesce(' · ' || new.telephone, '')));
     end if;
   elsif new.statut = 'valide' and old.statut is distinct from 'valide' then

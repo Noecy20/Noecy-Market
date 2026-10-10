@@ -87,12 +87,12 @@ async function adminPoll() {
     news++; A.seen.add(c.id);
     const txt = `${c.client_nom} · ${money(c.total)}${c.date_reservation ? ' · pour le ' + fDate(c.date_reservation) : ''}`;
     toast(`Nouvelle commande ${c.numero} — ${txt}`, 'info', 7000);
-    if (DB.mode === 'local' && document.hidden) localNotify(`Nouvelle commande ${c.numero}`, txt, '/#/admin/commandes');
+    if (DB.mode === 'local' && document.hidden) localNotify(`Nouvelle commande ${c.numero}`, txt, '/admin.html#/admin/commandes');
   });
   A.clients.filter((c) => !A.seen.has(c.id)).forEach((c) => {
     news++; A.seen.add(c.id);
     toast(`${c.nom} demande à être validé(e)`, 'info', 7000);
-    if (DB.mode === 'local' && document.hidden) localNotify('Nouveau client à valider', c.nom, '/#/admin/clients');
+    if (DB.mode === 'local' && document.hidden) localNotify('Nouveau client à valider', c.nom, '/admin.html#/admin/clients');
   });
   if (news && !document.hidden) ding();
   const sig = adminSig();
@@ -109,7 +109,7 @@ async function renderLogin() {
     <div class="blob" style="width:340px;height:340px;background:#f6a609;right:-80px;top:-60px"></div>
     <div class="blob" style="width:300px;height:300px;background:#e0435a;left:-80px;bottom:-60px;animation-delay:-6s"></div>
     <form class="login-card" id="login-form">
-      <a class="brand" href="#/"><span class="brand-logo">N</span><span class="brand-name">Noecy <b>Market</b></span></a>
+      <a class="brand" href="${urlBoutique()}"><span class="brand-logo">N</span><span class="brand-name">Noecy <b>Market</b></span></a>
       <h2>Espace gérante</h2>
       <p class="sub">${local ? 'Entrez votre code PIN' : 'Connectez-vous avec votre compte gérante'}</p>
       ${local
@@ -117,7 +117,7 @@ async function renderLogin() {
         : `<div class="field"><label>E-mail</label><input id="l-email" type="email" required autocomplete="username"></div>
            <div class="field"><label>Mot de passe</label><input id="l-pass" type="password" required autocomplete="current-password"></div>`}
       <button class="btn primary lg block" type="submit">Se connecter ${ic('arrow-right')}</button>
-      <p class="small muted" style="text-align:center;margin-top:16px"><a href="#/" style="color:var(--plum2)">Retour à la boutique</a></p>
+      <p class="small muted" style="text-align:center;margin-top:16px"><a href="${urlBoutique()}" style="color:var(--plum2)">Retour à la boutique</a></p>
     </form></div>`;
   icons();
   setTimeout(() => ($('#l-pin') || $('#l-email'))?.focus(), 300);
@@ -172,7 +172,7 @@ function renderShell() {
       <nav class="nav" id="nav"></nav>
       <div class="side-foot">
         <div class="mode-pill ${DB.mode === 'local' ? '' : 'cloud'}"><i class="d"></i>${DB.mode === 'local' ? 'Mode local (démo)' : 'En ligne · Supabase'}</div>
-        <a href="#/" target="_blank">${ic('store')} Voir la boutique</a>
+        <a href="${urlBoutique()}" target="_blank" rel="noopener">${ic('store')} Voir la boutique</a>
         <button data-act="logout">${ic('log-out')} Déconnexion</button>
       </div>
     </aside>
@@ -969,7 +969,7 @@ function remboursementModal(cl) {
   });
 }
 
-const lienConnexion = (c) => `${location.origin}${location.pathname}#/?c=${encodeURIComponent(c.id)}&t=${encodeURIComponent(c.token)}`;
+const lienConnexion = (c) => `${urlBoutique()}#/?c=${encodeURIComponent(c.id)}&t=${encodeURIComponent(c.token)}`;
 
 Object.assign(ACT, {
   'f-cli': (el) => { A.f.cli = el.dataset.k; renderPage(false); },

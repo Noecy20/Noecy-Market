@@ -5,11 +5,6 @@
 
 let CURRENT = null;
 
-function setManifest(admin) {
-  const l = $('#manifest');
-  if (l) l.setAttribute('href', admin ? 'manifest-admin.webmanifest' : 'manifest.webmanifest');
-}
-
 // Ouvre la fiche d'un client demandée depuis le tableau de bord
 function ouvrirFicheEnAttente() {
   const id = A.nextClient; A.nextClient = '';
@@ -24,7 +19,6 @@ async function route() {
     const page = h.split('/')[2] || 'dashboard';
     A.page = PAGES[page] ? page : 'dashboard';
     A.f.q = A.nextQ || ''; A.nextQ = '';
-    setManifest(true);
     if (CURRENT === 'admin' && A.ready) { renderPage(); ouvrirFicheEnAttente(); return; }
     stopShop();
     window.onscroll = null;
@@ -32,7 +26,6 @@ async function route() {
     await startAdmin();
     ouvrirFicheEnAttente();
   } else {
-    setManifest(false);
     // Un lien de connexion client relance la boutique même si elle est déjà ouverte
     if (CURRENT === 'shop' && !/[?&]c=/.test(h)) { renderShopView(); return; }
     stopAdmin();

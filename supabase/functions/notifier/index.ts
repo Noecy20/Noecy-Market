@@ -114,7 +114,7 @@ async function rappels(): Promise<number> {
   if (attente) morceaux.push(`${attente} commande(s) en attente`);
   if (totalDu) morceaux.push(`${fmt(totalDu)} ${devise} de crédits à recouvrer`);
   if (morceaux.length) {
-    n += await envoyer(await abonnesAdmins(), { titre: 'Bonjour Noecy', corps: morceaux.join(' · '), url: '/#/admin', tag: 'resume' });
+    n += await envoyer(await abonnesAdmins(), { titre: 'Bonjour Noecy', corps: morceaux.join(' · '), url: '/admin.html', tag: 'resume' });
   }
   return n;
 }
@@ -129,7 +129,7 @@ Deno.serve(async (req) => {
 
     let envoyes = 0;
     if (p.type === 'rappels') envoyes = await rappels();
-    else if (p.type === 'test') envoyes = await envoyer(await abonnesAdmins(), { titre: 'Noecy Market', corps: 'Les notifications fonctionnent sur cet appareil.', url: '/#/admin' });
+    else if (p.type === 'test') envoyes = await envoyer(await abonnesAdmins(), { titre: 'Noecy Market', corps: 'Les notifications fonctionnent sur cet appareil.', url: '/admin.html' });
     else if (p.cible === 'admins') envoyes = await envoyer(await abonnesAdmins(), p);
     else if (p.cible === 'client' && p.client_id) envoyes = await envoyer(await abonnesClient(p.client_id), p);
     else return json({ erreur: 'Requête invalide.' }, 400);

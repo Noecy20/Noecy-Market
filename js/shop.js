@@ -125,7 +125,7 @@ function renderShop() {
     <footer class="shop-foot">
       © ${new Date().getFullYear()} ${esc(SETTINGS.nom_boutique)} · fait maison
       ${SETTINGS.whatsapp ? ` · <a href="${waLink(SETTINGS.whatsapp, 'Bonjour Noecy')}" target="_blank" rel="noopener">Nous écrire sur WhatsApp</a>` : ''}
-      · <a href="#/admin">Espace gérante</a>
+      · <a href="admin.html">Espace gérante</a>
     </footer>
     <button class="fab-cart" id="fab-cart" data-act="open-cart"><span id="fab-txt"></span><span class="go">Voir le panier ${ic('arrow-right')}</span></button>`;
   renderStatus();
