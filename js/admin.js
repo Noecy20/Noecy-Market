@@ -257,7 +257,7 @@ const NAV_PF = [
 const PAGES_PF = NAV_PF.map(([k]) => k);
 function navItems() {
   if (!A.boutique) return [];
-  const items = NAV_BASE.map((x) => [...x]);
+  const items = NAV_BASE.map((x) => [...x]).filter(([k]) => k !== 'pointsvente' || optionBq(A.boutique, 'points_vente'));
   if (estResto()) {
     items.splice(1, 0, ['menu', 'Menu du jour', 'utensils-crossed']);
     const inv = items.find((x) => x[0] === 'inventaire'); if (inv) inv[1] = 'Ingrédients & achats';
@@ -269,7 +269,7 @@ function navItems() {
 function navBadges() {
   return {
     commandes: [A.commandes.filter((c) => c.statut === 'en_attente').length, ''],
-    clients: [A.clients.filter((c) => c.statut === 'en_attente').length, ''],
+    clients: [A.clients.filter((c) => c.statut === 'en_attente' || c.suppression_demandee_at).length, ''],
     relances: [A.commandes.filter((c) => c.statut === 'credit' || nousDevons(c) > 0).length, 'red'],
     inventaire: [(estResto() ? 0 : A.produits.filter((p) => p.actif && suivi(p) && p.stock <= seuilOf(p)).length) + A.matieres.filter((m) => m.seuil > 0 && m.stock <= m.seuil).length, 'red'],
     menu: [estResto() && !A.menus.some((m) => m.date === dayKey() && m.publie) ? 1 : 0, 'red'],
@@ -1064,18 +1064,19 @@ ACT['quick-sale'] = () => {
 PAGES.clients = {
   title: 'Clients',
   render() {
-    const tabs = [['en_attente', 'À valider'], ['valide', 'Validés'], ['refuse', 'Refusés']];
+    const tabs = [['en_attente', 'À valider'], ['valide', 'Validés'], ['refuse', 'Refusés'], ['suppression', 'Suppressions']];
+    const filtre = (c, k) => (k === 'suppression' ? !!c.suppression_demandee_at : c.statut === k);
     const q = norm(A.f.q);
-    const list = A.clients.filter((c) => c.statut === A.f.cli).filter((c) => !q || norm(c.nom + ' ' + (c.telephone || '')).includes(q))
+    const list = A.clients.filter((c) => filtre(c, A.f.cli)).filter((c) => !q || norm(c.nom + ' ' + (c.telephone || '')).includes(q))
       .sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)));
     return `
-    <div class="page-head"><div><h1>Clients</h1><p class="muted">Vérifiez que chaque personne existe vraiment avant d'autoriser ses commandes.</p></div>
+    <div class="page-head"><div><h1>Clients</h1><p class="muted">${optionBq(A.boutique, 'validation_clients') ? 'Vérifiez que chaque personne existe vraiment avant d\'autoriser ses commandes.' : 'Vos clients peuvent commander dès leur inscription.'}</p></div>
       <button class="btn primary" data-act="cli-add">${ic('user-plus')} Ajouter un client</button></div>
     <div class="toolbar">
-      <div class="seg scroll">${tabs.map(([k, l]) => { const n = A.clients.filter((c) => c.statut === k).length; return `<button class="${A.f.cli === k ? 'on' : ''}" data-act="f-cli" data-k="${k}">${l}${n ? `<span class="count">${n}</span>` : ''}</button>`; }).join('')}</div>
+      <div class="seg scroll">${tabs.filter(([k]) => k !== 'en_attente' || optionBq(A.boutique, 'validation_clients') || A.clients.some((c) => c.statut === 'en_attente')).map(([k, l]) => { const n = A.clients.filter((c) => filtre(c, k)).length; return `<button class="${A.f.cli === k ? 'on' : ''}" data-act="f-cli" data-k="${k}">${l}${n ? `<span class="count">${n}</span>` : ''}</button>`; }).join('')}</div>
       <label class="search field" style="margin:0">${ic('search')}<input class="input" placeholder="Nom ou téléphone…" data-inp="adm-q" value="${esc(A.f.q)}"></label>
     </div>
-    <div class="cards">${list.length ? list.map(clientCard).join('') : `<div class="empty"><span class="big">${ic(A.f.cli === 'en_attente' ? 'user-check' : 'users')}</span><h3>${A.f.cli === 'en_attente' ? 'Aucune demande en attente' : 'Aucun client'}</h3></div>`}</div>`;
+    <div class="cards">${list.length ? list.map(clientCard).join('') : `<div class="empty"><span class="big">${ic(A.f.cli === 'en_attente' ? 'user-check' : A.f.cli === 'suppression' ? 'user-x' : 'users')}</span><h3>${A.f.cli === 'en_attente' ? 'Aucune demande en attente' : A.f.cli === 'suppression' ? 'Aucune demande de suppression' : 'Aucun client'}</h3></div>`}</div>`;
   },
 };
 
@@ -1092,7 +1093,8 @@ function clientCard(c, i) {
     : [];
   const id = esc(c.id);
   let acts = '';
-  if (c.statut === 'en_attente') acts = `<button class="btn leaf sm" data-act="cli-valider" data-id="${id}">${ic('user-check')} Valider</button><button class="btn ghost sm" data-act="cli-refuser" data-id="${id}">${ic('user-x')} Refuser</button>`;
+  if (c.suppression_demandee_at) acts = `<button class="btn danger sm" data-act="cli-suppr-ok" data-id="${id}">${ic('trash-2')} Supprimer le compte</button><button class="btn ghost sm" data-act="cli-suppr-non" data-id="${id}">Garder le compte</button>`;
+  else if (c.statut === 'en_attente') acts = `<button class="btn leaf sm" data-act="cli-valider" data-id="${id}">${ic('user-check')} Valider</button><button class="btn ghost sm" data-act="cli-refuser" data-id="${id}">${ic('user-x')} Refuser</button>`;
   else if (c.statut === 'valide') {
     acts = `<button class="btn soft sm" data-act="cli-detail" data-id="${id}">${ic('history')} Historique</button>
       ${st.du ? `<button class="btn leaf sm" data-act="cli-rembourser" data-id="${id}">${ic('banknote')} Remboursement</button>` : ''}
@@ -1102,6 +1104,7 @@ function clientCard(c, i) {
   return `<div class="client-card" style="--i:${i}">
     <div class="ch"><span class="avatar">${esc(initials(c.nom))}</span><div class="nm"><b>${esc(c.nom)}</b><span class="small muted">${c.telephone ? esc(c.telephone) : 'Pas de téléphone'} · ${fDate(c.created_at)}</span></div>
       ${c.statut === 'en_attente' ? '<span class="pill warn dot pulse">À valider</span>' : c.statut === 'valide' ? '<span class="pill ok">Validé</span>' : '<span class="pill bad">Refusé</span>'}</div>
+    ${c.suppression_demandee_at ? `<div class="dup" style="background:var(--danger-soft);color:var(--danger)">${ic('user-x')} Suppression demandée le ${fDate(c.suppression_demandee_at)}${c.suppression_motif ? ` : « ${esc(c.suppression_motif)} »` : ''}${st.du ? ` · il doit encore ${money(st.du)}` : ''}</div>` : ''}
     ${similaires.length ? `<div class="dup">${ic('triangle-alert')} Ressemble à : ${similaires.map((x) => esc(x.nom)).join(', ')}</div>` : ''}
     ${c.statut !== 'en_attente' ? `<div class="cstats"><div><small>Commandes</small><b>${st.n}</b></div><div><small>Total acheté</small><b>${money(st.total)}</b></div><div><small>${st.devons ? 'Nous devons' : 'Reste dû'}</small><b style="color:${st.du ? 'var(--danger)' : st.devons ? '#b05a00' : 'inherit'}">${money(st.devons || st.du)}</b></div></div>` : ''}
     <div class="oc-actions">${acts}</div>
@@ -1149,6 +1152,16 @@ Object.assign(ACT, {
     await run(null, async () => { await DB.remove('clients', el.dataset.id); await refreshAfter(); });
   },
   'cli-rembourser': (el) => remboursementModal(client(el.dataset.id)),
+  // Demande de suppression faite par le client depuis son profil
+  'cli-suppr-ok': async (el) => {
+    const c = client(el.dataset.id), du = clientStats(c.id).du;
+    if (!(await confirmBox(`Supprimer définitivement le compte de <b>${esc(c.nom)}</b> ?<br><span class="small muted">Ses commandes passées restent dans votre historique (au nom de ${esc(c.nom)}).${du ? ` Attention : il doit encore ${money(du)}.` : ''}</span>`, { ok: 'Supprimer le compte', danger: true }))) return;
+    await run(null, async () => { await DB.remove('clients', c.id); toast('Compte supprimé'); await refreshAfter(); });
+  },
+  'cli-suppr-non': (el) => run(el, async () => {
+    await DB.update('clients', el.dataset.id, { suppression_demandee_at: null, suppression_motif: null });
+    toast('Demande de suppression refusée : le compte est conservé'); await refreshAfter();
+  }),
   'cli-lien': (el) => {
     const c = client(el.dataset.id);
     const msg = `Bonjour ${c.nom}, voici votre lien de connexion à ${SETTINGS.nom_boutique} (gardez-le pour vous) :\n${lienConnexion(c)}`;

@@ -14,6 +14,9 @@ const SHOP = {
 };
 // Identifiants client et panier propres à chaque boutique
 const lsClient = () => 'noecy_client_' + SHOP.bid;
+const LS_IDENTITE = 'noecy_identite';
+const identite = () => { try { return JSON.parse(localStorage.getItem(LS_IDENTITE)) || null; } catch (e) { return null; } };
+const optS = (k) => optionBq(SHOP.boutique, k);
 const lsCart = () => 'noecy_cart_' + SHOP.bid;
 
 function loadCart() { try { return JSON.parse(localStorage.getItem(lsCart())) || {}; } catch (e) { return {}; } }
@@ -85,9 +88,6 @@ async function startShop(slug) {
     ['client', 'cart'].forEach((k) => { const v = localStorage.getItem('noecy_' + k); if (v && !localStorage.getItem(`noecy_${k}_noecy`)) localStorage.setItem(`noecy_${k}_noecy`, v); });
   }
   try { localStorage.setItem(LS_DERNIERE, JSON.stringify({ id: b.id, slug: b.slug, nom: b.nom })); } catch (e) { /* ignore */ }
-  // L'écran d'accueil du téléphone doit ouvrir cette boutique, pas la vitrine
-  $('#manifest')?.remove();
-  const t = $('meta[name=apple-mobile-web-app-title]'); if (t) t.content = b.nom;
   SHOP.cart = loadCart();
   const viaLien = lireLienConnexion();
   try {
@@ -160,6 +160,7 @@ function renderShop() {
     <header class="shop-top" id="shop-top">
       ${brandHtml()}
       <div class="top-actions">
+        <a class="icon-btn" href="${urlBoutique()}" title="Toutes les boutiques" aria-label="Toutes les boutiques">${ic('layout-grid')}</a>
         <button class="icon-btn" data-act="go-profil" title="Mon profil" aria-label="Mon profil">${ic('user-round')}</button>
         <button class="cart-btn" data-act="open-cart" id="cart-btn">${ic('shopping-bag')}<span class="hide-sm">Panier</span><span class="badge" id="cart-count">0</span></button>
       </div>
@@ -211,12 +212,15 @@ async function renderStatus() {
   } else {
     cards.push(`<div class="status-card bad"><span class="si">${ic('circle-x')}</span><span><b>Demande non validée</b><small>Contactez ${esc(SHOP.boutique.nom)} pour plus d'informations.</small></span></div>`);
   }
+  if (c && c.suppression_demandee_at) {
+    cards.push(`<button class="status-card bad" data-act="client-suppr"><span class="si">${ic('user-x')}</span><span><b>Suppression du compte demandée</b><small>En attente de validation par ${esc(SHOP.boutique.nom)}.</small></span></button>`);
+  }
   if (c && c.du > 0) {
     const wl = waveLink(c.du);
     cards.push(`<div class="status-card debt"><span class="si">${ic('hand-coins')}</span><span><b>Il reste ${money(c.du)} à régler</b><small>Merci de régulariser dès que possible.</small></span>${wl ? `<a class="btn wave sm" href="${esc(wl)}" target="_blank" rel="noopener">Payer avec Wave</a>` : ''}</div>`);
   }
   const actions = [];
-  if (c && c.statut !== 'refuse' && DB.pushDisponible()) actions.push(`<button class="status-pill hidden" id="push-pill" data-act="client-push">${ic('bell-ring')} Recevoir les notifications</button>`);
+  if (c && c.statut !== 'refuse' && DB.pushDisponible()) actions.push(`<button class="status-pill hidden" id="push-pill" data-act="client-guide">${ic('bell-ring')} Recevoir les notifications</button>`);
   el.innerHTML = cards.join('') + (actions.length ? `<div class="status-actions">${actions.join('')}</div>` : '');
   icons();
   const pill = $('#push-pill');
@@ -379,17 +383,44 @@ Object.assign(ACT, {
     SHOP.menuDate = el.dataset.k; SHOP.cart = {}; saveCart();
     renderShop();
   },
+  'client-guide': () => guideNotifications({ role: 'client', activer: SHOP.client && DB.pushDisponible() ? () => ACT['client-push'](null) : null }),
   'client-push': (el) => run(el, async () => {
-    const sub = await subscribePush();
+    const sub = await subscribePush().catch((e) => { guideNotifications({ role: 'client' }); throw e; });
     await DB.savePushClient(SHOP.client.id, SHOP.client.token, sub);
     toast('Notifications activées : vous serez prévenu(e) ici, même application fermée.');
     renderStatus();
   }),
   'client-logout': async () => {
-    if (!(await confirmBox('Se déconnecter de ce téléphone ? Vous pourrez revenir avec votre numéro de téléphone.', { ok: 'Se déconnecter' }))) return;
+    if (!(await confirmBox('Se déconnecter ? Vous pourrez revenir à tout moment avec votre numéro de téléphone.', { ok: 'Se déconnecter' }))) return;
     localStorage.removeItem(lsClient());
     SHOP.client = null; SHOP.commandes = []; SHOP.cart = {}; saveCart();
-    location.hash = '#/'; renderShop(); askName();
+    location.hash = '#/'; renderShop(); toast('Vous êtes déconnecté(e).');
+  },
+  // Pas de changement de compte : le client demande la suppression, la boutique la valide
+  'client-suppr': () => {
+    const c = SHOP.client;
+    if (c.suppression_demandee_at) {
+      modal({
+        title: 'Suppression demandée',
+        body: `<p>Votre demande du ${fDate(c.suppression_demandee_at)} est en attente de validation par ${esc(SHOP.boutique.nom)}.</p>`,
+        foot: `<button class="btn ghost" data-close>Fermer</button><button class="btn primary" id="sp-annul">Annuler ma demande</button>`,
+        onMount: (el, close) => { $('#sp-annul', el).onclick = (e) => run(e.currentTarget, async () => { await DB.annulerSuppression(c.id, c.token); await refreshClient(); close(); toast('Demande annulée'); renderShopView(); }); },
+      });
+      return;
+    }
+    modal({
+      title: 'Supprimer mon compte',
+      body: `<p class="muted" style="margin-bottom:12px">Votre demande sera envoyée à ${esc(SHOP.boutique.nom)}, qui la validera. Vos commandes passées restent enregistrées dans la boutique.</p>
+        ${c.du > 0 ? `<p class="note-box small" style="margin-bottom:12px">${ic('hand-coins')}<span>Il reste ${money(c.du)} à régler : la boutique peut attendre le règlement avant de supprimer le compte.</span></p>` : ''}
+        <div class="field"><label>Raison (facultatif)</label><textarea id="sp-motif" maxlength="300" placeholder="Ex. je change de numéro"></textarea></div>`,
+      foot: `<button class="btn ghost" data-close>Annuler</button><button class="btn danger" id="sp-ok">Demander la suppression</button>`,
+      onMount: (el, close) => {
+        $('#sp-ok', el).onclick = (e) => run(e.currentTarget, async () => {
+          await DB.demanderSuppression(c.id, c.token, $('#sp-motif', el).value.trim());
+          await refreshClient(); close(); toast('Demande envoyée à la boutique'); renderShopView();
+        });
+      },
+    });
   },
 });
 INP['shop-q'] = debounce((el) => { SHOP.q = el.value; renderGrid(); }, 180);
@@ -405,16 +436,16 @@ function askName(tab = 'new') {
       <h2>Bienvenue chez ${esc(SETTINGS.nom_boutique)}</h2>
       <div class="seg gate-tabs"><button type="button" data-g="new">Je suis nouveau</button><button type="button" data-g="login">J'ai déjà un compte</button></div>
       <form id="gate-new" autocomplete="on">
-        <p>Dites-nous qui vous êtes. ${esc(SHOP.boutique.nom)} valide votre nom avant votre première commande.</p>
-        <div class="field"><label for="g-nom">Nom complet *</label><input id="g-nom" name="name" required minlength="2" maxlength="80" placeholder="Ex. Awa Diop" autocomplete="name"></div>
-        <div class="field"><label for="g-tel">Téléphone *</label><input id="g-tel" name="tel" type="tel" required maxlength="30" placeholder="Ex. 77 123 45 67" autocomplete="tel">
+        <p>${identite() ? `Première commande chez ${esc(SHOP.boutique.nom)} ? Vos informations sont déjà remplies.` : 'Dites-nous qui vous êtes.'}${optS('validation_clients') ? ` ${esc(SHOP.boutique.nom)} valide votre nom avant votre première commande.` : ''}</p>
+        <div class="field"><label for="g-nom">Nom complet *</label><input id="g-nom" name="name" required minlength="2" maxlength="80" placeholder="Ex. Awa Diop" autocomplete="name" value="${esc(identite()?.nom || '')}"></div>
+        <div class="field"><label for="g-tel">Téléphone *</label><input id="g-tel" name="tel" type="tel" required maxlength="30" placeholder="Ex. 77 123 45 67" autocomplete="tel" value="${esc(identite()?.tel || '')}">
           <span class="hint">Il vous servira à retrouver votre compte sur un autre téléphone.</span></div>
         <button class="btn primary lg block" type="submit">Continuer ${ic('arrow-right')}</button>
-        <p class="small muted" style="margin:12px 0 0">Vous pourrez découvrir les articles pendant la validation.</p>
+        ${optS('validation_clients') ? '<p class="small muted" style="margin:12px 0 0">Vous pourrez découvrir les articles pendant la validation.</p>' : ''}
       </form>
       <form id="gate-login" class="hidden" autocomplete="on">
         <p>Entrez le numéro avec lequel vous vous êtes inscrit(e).</p>
-        <div class="field"><label for="l-tel">Téléphone</label><input id="l-tel" type="tel" required maxlength="30" placeholder="Ex. 77 123 45 67" autocomplete="tel"></div>
+        <div class="field"><label for="l-tel">Téléphone</label><input id="l-tel" type="tel" required maxlength="30" placeholder="Ex. 77 123 45 67" autocomplete="tel" value="${esc(identite()?.tel || '')}"></div>
         <button class="btn primary lg block" type="submit">Me connecter ${ic('log-in')}</button>
       </form>
     </div>`,
@@ -429,6 +460,7 @@ function askName(tab = 'new') {
       show(tab);
       const done = async (r, msg) => {
         setCreds(r);
+        try { localStorage.setItem(LS_IDENTITE, JSON.stringify({ nom: ($('#g-nom', el).value || identite()?.nom || '').trim(), tel: ($('#g-tel', el).value || $('#l-tel', el).value || '').trim() })); } catch (e) { /* ignore */ }
         await refreshClient();
         close();
         renderShop();
@@ -440,7 +472,7 @@ function askName(tab = 'new') {
           const nom = $('#g-nom', el).value.trim();
           if (nom.length < 2) throw new Error('Merci d\'indiquer votre nom.');
           const r = await DB.registerClient(nom, $('#g-tel', el).value.trim());
-          await done(r, `Merci ! Votre demande est envoyée à ${SHOP.boutique.nom}.`);
+          await done(r, optS('validation_clients') ? `Merci ! Votre demande est envoyée à ${SHOP.boutique.nom}.` : `Bienvenue chez ${SHOP.boutique.nom} !`);
         });
       });
       $('#gate-login', el).addEventListener('submit', (e) => {
@@ -479,7 +511,7 @@ function cartBodyHtml() {
   if (needResa) SHOP.quand = 'resa';
   const quand = SHOP.resto ? `
     <h4 class="cart-h">${esc(menuLibelle(SHOP.menuDate))}</h4>
-    <div class="seg seg-full">${Object.entries(MODES_RETRAIT).map(([k, [l, i]]) => `<button type="button" class="${SHOP.mode === k ? 'on' : ''}" data-act="mode-retrait" data-k="${k}">${ic(i)} ${l}</button>`).join('')}</div>
+    <div class="seg seg-full">${Object.entries(MODES_RETRAIT).filter(([k]) => k !== 'livraison' || optS('livraison')).map(([k, [l, i]]) => `<button type="button" class="${SHOP.mode === k ? 'on' : ''}" data-act="mode-retrait" data-k="${k}">${ic(i)} ${l}</button>`).join('')}</div>
     ${SHOP.mode === 'livraison' ? `<div class="field" style="margin-top:12px"><label for="c-adresse">Adresse de livraison *</label><textarea id="c-adresse" maxlength="200" data-inp="c-adresse" placeholder="Quartier, rue, repère…">${esc(SHOP.adresse)}</textarea></div>` : ''}
     <div class="field" style="margin-top:12px"><label for="c-heure-r">Heure souhaitée</label><select id="c-heure-r" data-inp="c-heure-r">${CRENEAUX_RESTO.map((c) => `<option ${c === SHOP.heureResto ? 'selected' : ''}>${c}</option>`).join('')}</select></div>` : null;
   if (SHOP.partWave === null || SHOP.partWave > total) SHOP.partWave = Math.round(total / 2);
@@ -503,7 +535,7 @@ function cartBodyHtml() {
 
     <h4 class="cart-h">Moyen de paiement</h4>
     <div class="pay-opts">
-      ${Object.entries(PAY).map(([k, v]) => `<label class="pay-opt ${SHOP.moyen === k ? 'on' : ''}" data-act="pay-pick" data-k="${k}">
+      ${Object.entries(PAY).filter(([k]) => k !== 'credit' || optS('paiement_credit')).map(([k, v]) => `<label class="pay-opt ${SHOP.moyen === k ? 'on' : ''}" data-act="pay-pick" data-k="${k}">
         <span class="pi" style="background:${v.bg}">${ic(v.icon)}</span>
         <span><b>${v.label}</b><small>${v.sub}</small></span><span class="radio"></span></label>`).join('')}
     </div>
@@ -620,8 +652,8 @@ function openMyOrders() {
       ${c.statut === 'valide' ? '<span class="pill ok">Validé</span>' : c.statut === 'en_attente' ? '<span class="pill warn">En attente</span>' : '<span class="pill bad">Refusé</span>'}
     </div>
     <div class="account-actions">
-      ${DB.pushDisponible() ? `<button class="btn ghost sm" data-act="client-push">${ic('bell-ring')} Notifications</button>` : ''}
-      <button class="btn ghost sm" data-close data-act="client-logout">${ic('log-out')} Changer de compte</button>
+      <button class="btn ghost sm" data-close data-act="client-guide">${ic('bell-ring')} Notifications</button>
+      <button class="btn ghost sm" data-close data-act="client-logout">${ic('log-out')} Se déconnecter</button>
     </div>`;
   let liste;
   if (!SHOP.commandes.length) liste = `<div class="empty" style="padding:30px 10px"><span class="big">${ic('receipt')}</span><h3>Aucune commande pour l'instant</h3><p>Vos commandes apparaîtront ici.</p></div>`;
@@ -712,15 +744,15 @@ function renderProfil(animate = true) {
           <div class="profil-tags">${c.statut === 'valide' ? `<span class="pill ok">${ic('badge-check')} Compte validé</span>` : c.statut === 'en_attente' ? `<span class="pill warn">${ic('hourglass')} En attente de validation</span>` : '<span class="pill bad">Non validé</span>'}</div>
         </div>
         <div class="profil-actions">
-          ${DB.pushDisponible() ? `<button class="btn soft sm" data-act="client-push">${ic('bell-ring')} Notifications</button>` : ''}
-          <button class="btn ghost-light sm" data-act="client-logout">${ic('log-out')} Changer de compte</button>
+          <button class="btn soft sm" data-act="client-guide">${ic('bell-ring')} Notifications</button>
+          <button class="btn ghost-light sm" data-act="client-logout">${ic('log-out')} Se déconnecter</button>
         </div>
       </section>
 
       <section class="profil-stats">
         <div class="pstat"><span class="pi">${ic('receipt')}</span><small>Commandes</small><b data-count="${st.nb}">0</b></div>
         <div class="pstat"><span class="pi">${ic('package')}</span><small>Articles achetés</small><b data-count="${st.articles}">0</b></div>
-        <div class="pstat ${c.du > 0 ? 'due' : ''}"><span class="pi">${ic('hand-coins')}</span><small>Reste à payer</small><b>${money(c.du || 0)}</b>${wl ? `<a class="btn wave sm" href="${esc(wl)}" target="_blank" rel="noopener">Payer avec Wave</a>` : ''}</div>
+        <div class="pstat reste ${c.du > 0 ? 'due' : ''}"><span class="pi">${ic('hand-coins')}</span><small>Reste à payer</small><b>${money(c.du || 0)}</b>${wl ? `<a class="btn wave sm" href="${esc(wl)}" target="_blank" rel="noopener">Payer avec Wave</a>` : ''}</div>
       </section>
 
       <section class="profil-section">
@@ -761,6 +793,10 @@ function renderProfil(animate = true) {
             </div>
           </div>`;
         }).join('') : `<div class="empty" style="padding:24px 10px"><span class="big">${ic('receipt')}</span><p>Aucune commande${sel ? ' dans cette catégorie' : ''}.</p></div>`}</div>
+      </section>
+      <section class="profil-compte">
+        <button class="btn ghost sm" data-act="client-guide">${ic('circle-help')} Comment recevoir les notifications ?</button>
+        <button class="btn ghost sm danger-txt" data-act="client-suppr">${ic('user-x')} ${c.suppression_demandee_at ? 'Suppression demandée' : 'Supprimer mon compte'}</button>
       </section>
     </main>
     <button class="fab-cart" id="fab-cart" data-act="open-cart"><span id="fab-txt"></span><span class="go">Voir le panier ${ic('arrow-right')}</span></button>`;

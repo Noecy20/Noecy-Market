@@ -220,6 +220,7 @@ PAGES.parametres = {
         <div class="btn-row">
           <button class="btn primary sm" data-act="admin-push" id="push-btn">${ic('bell-ring')} Activer sur cet appareil</button>
           <button class="btn ghost sm" data-act="admin-push-test">${ic('send')} Tester</button>
+          <button class="btn ghost sm" data-act="admin-guide">${ic('circle-help')} Guide</button>
           <button class="btn ghost sm" data-act="admin-notif-local">${ic('monitor')} Notifications du navigateur</button>
         </div>
         ${isIOS && !isStandalone() ? `<p class="note-box info small" style="margin-top:12px">${ic('smartphone')}<span>Sur iPhone : touchez <b>Partager</b> puis <b>« Sur l'écran d'accueil »</b>, ouvrez l'app depuis l'icône, puis revenez ici activer les notifications.</span></p>` : ''}
@@ -234,6 +235,10 @@ PAGES.parametres = {
         <div class="field"><label>Ville / quartier</label><input id="bq-ville" maxlength="60" value="${esc(A.boutique.ville || '')}"></div>
         <div class="field"><label>Présentation (affichée sur la vitrine)</label><textarea id="bq-desc" maxlength="400">${esc(A.boutique.description || '')}</textarea></div>
         <div class="field"><label>Lien à partager à vos clients</label><div class="copy-line"><input class="input" readonly value="${esc(lienBoutique(A.boutique.slug))}"><button type="button" class="btn soft sm" data-act="bq-copier">${ic('copy')} Copier</button></div></div>
+      </div>
+      <div class="card"><div class="card-head"><h3>Accès de la boutique</h3><span class="small muted">${A.me.super ? 'Réglables dans Plateforme → Boutiques' : 'Décidés par la plateforme'}</span></div>
+        <div class="acces-liste">${OPTIONS_BQ.map(([k, l, d, i]) => `<div class="acces ${optionBq(A.boutique, k) ? 'on' : ''}"><span class="ac-ic">${ic(i)}</span><span><b>${l}</b><small>${d}</small></span><span class="pill ${optionBq(A.boutique, k) ? 'ok' : ''}">${optionBq(A.boutique, k) ? 'Activé' : 'Désactivé'}</span></div>`).join('')}</div>
+        ${A.me.super ? `<button class="btn soft sm" style="margin-top:12px" data-act="pf-acces" data-id="${esc(A.boutique.id)}">${ic('sliders-horizontal')} Modifier les accès</button>` : ''}
       </div>
       <div class="card"><div class="card-head"><h3>Accueil & contact</h3></div>
         <div class="field"><label>Slogan (page d'accueil)</label><textarea id="s-slogan" maxlength="200">${esc(s.slogan)}</textarea></div>
@@ -311,6 +316,7 @@ Object.assign(ACT, {
     toast('Notifications activées sur cet appareil');
     renderPage(false);
   }),
+  'admin-guide': () => guideNotifications({ role: A.me.super && !A.boutique ? 'super' : 'gerant', activer: DB.pushDisponible() ? () => ACT['admin-push']($('[data-act="admin-push"]')) : null }),
   'admin-push-test': (el) => run(el, async () => {
     if (!DB.pushDisponible()) {
       if (('Notification' in window) && Notification.permission === 'granted') { await localNotify(A.boutique?.nom || PLATEFORME.nom || 'Notifications', 'Les notifications du navigateur fonctionnent.', '/admin.html'); return; }

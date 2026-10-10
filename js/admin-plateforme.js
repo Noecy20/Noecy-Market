@@ -97,9 +97,11 @@ PAGES.boutiques = {
       <div class="cards">${list.map((b, i) => `<div class="client-card" style="--i:${i}">
         <div class="ch">${logoBoutique(b)}<div class="nm"><b>${esc(b.nom)}</b><span class="small muted">${b.type === 'restaurant' ? 'Restaurant' : 'Boutique'} · /?b=${esc(b.slug)}</span></div>${pillBq(b.statut)}</div>
         <div class="small muted">${esc(b.email || '')}${b.telephone ? ' · ' + esc(b.telephone) : ''}${b.validee_at ? ` · en ligne depuis le ${fDate(b.validee_at)}` : ''}</div>
+        <div class="droits-chips">${OPTIONS_BQ.map(([k, l]) => `<span class="pill ${optionBq(b, k) ? 'ok' : ''}">${optionBq(b, k) ? ic('check') : ic('x')} ${l}</span>`).join('')}</div>
         <div class="oc-actions">
           ${b.statut === 'active' || b.statut === 'suspendue' ? `<button class="btn soft sm" data-act="pf-gerer" data-id="${esc(b.id)}">${ic('settings-2')} Gérer</button>` : ''}
           ${b.statut === 'active' ? `<a class="btn ghost sm" href="${esc(lienBoutique(b.slug))}" target="_blank" rel="noopener">${ic('external-link')}</a>` : ''}
+          <button class="btn ghost sm" data-act="pf-acces" data-id="${esc(b.id)}">${ic('sliders-horizontal')} Accès</button>
           ${b.statut === 'active' ? `<button class="btn ghost sm" data-act="pf-statut" data-id="${esc(b.id)}" data-s="suspendue">${ic('pause')} Suspendre</button>` : ''}
           ${b.statut === 'suspendue' ? `<button class="btn leaf sm" data-act="pf-statut" data-id="${esc(b.id)}" data-s="active">${ic('play')} Réactiver</button>` : ''}
           ${b.statut === 'en_attente' || b.statut === 'refusee' ? `<button class="btn ghost sm" data-act="goto" data-page="demandes">${ic('inbox')} Voir la demande</button>` : ''}
@@ -150,6 +152,27 @@ Object.assign(ACT, {
     await startAdmin();
   }),
   'pf-filtre': (el) => { A.f.bqStatut = el.dataset.k; renderPage(false); },
+  // Accès d'une boutique : validation des clients, crédit, livraison, points de vente
+  'pf-acces': (el) => {
+    const b = bqById(el.dataset.id) || (A.boutique?.id === el.dataset.id ? A.boutique : null);
+    modal({
+      title: `Accès de ${esc(b.nom)}`,
+      body: `<p class="muted small" style="margin-bottom:12px">Ces réglages s'appliquent immédiatement à la boutique et à ses clients.</p>
+        <div class="droits-list">${OPTIONS_BQ.filter(([k]) => k !== 'livraison' || b.type === 'restaurant').map(([k, l, d]) => `<label class="check toggle-line"><span class="switch"><input type="checkbox" data-opt="${k}" ${optionBq(b, k) ? 'checked' : ''}><span></span></span><span><b>${l}</b><br><span class="small muted">${d}</span></span></label>`).join('')}</div>`,
+      foot: `<button class="btn ghost" data-close>Annuler</button><button class="btn primary" id="ac-ok">${ic('check')} Enregistrer</button>`,
+      onMount: (m, close) => {
+        $('#ac-ok', m).onclick = (e) => run(e.currentTarget, async () => {
+          const options = { ...(b.options || {}) };
+          $$('[data-opt]', m).forEach((c) => { options[c.dataset.opt] = c.checked; });
+          const r = await DB.majBoutique(b.id, { options });
+          if (A.boutique?.id === b.id) A.boutique = { ...A.boutique, ...r };
+          close(); toast('Accès enregistrés');
+          if (A.me.super) A.toutes = await DB.toutesBoutiques();
+          renderShell(); renderPage(false);
+        });
+      },
+    });
+  },
   'pf-paye': (el) => {
     setTimeout(() => run(null, async () => {
       await DB.majBoutique(el.dataset.id, { paiement_valide: el.checked, paiement_valide_at: el.checked ? iso() : null });

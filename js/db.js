@@ -62,7 +62,9 @@
   const MODES = ['sur_place', 'emporter', 'livraison'];
 
   // Champs d'une boutique visibles par tous
-  const publicBoutique = (b) => b && ({ id: b.id, slug: b.slug, nom: b.nom, type: b.type, ville: b.ville, description: b.description, logo: b.logo, couleur: b.couleur, statut: b.statut });
+  const publicBoutique = (b) => b && ({ id: b.id, slug: b.slug, nom: b.nom, type: b.type, ville: b.ville, description: b.description, logo: b.logo, couleur: b.couleur, statut: b.statut, options: b.options || {} });
+  // Accès réglés par l'administrateur de la plateforme (absents = autorisés)
+  const opt = (b, k) => ((b && b.options) || {})[k] !== false;
   const slugify = (s) => String(s || 'boutique').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 30) || 'boutique';
 
   /* ------------------------------------------------------------------ */
@@ -186,7 +188,8 @@
       if (nom.length < 2) throw new Error('Le nom est obligatoire.');
       if (digits(telephone).length < 8) throw new Error('Le numéro de téléphone est obligatoire.');
       if (this._findTel(telephone)) throw new Error('Ce numéro a déjà un compte. Utilisez « J\'ai déjà un compte ».');
-      const c = { id: uid(), token: uid(), boutique_id: this.boutique, nom, telephone: String(telephone).trim(), statut: 'en_attente', note: '', created_at: now() };
+      const statut = opt(this._bq(), 'validation_clients') ? 'en_attente' : 'valide';
+      const c = { id: uid(), token: uid(), boutique_id: this.boutique, nom, telephone: String(telephone).trim(), statut, note: '', created_at: now() };
       this.db().clients.push(c); this._save();
       return { id: c.id, token: c.token };
     },
@@ -202,7 +205,18 @@
       if (!c) return null;
       const du = db.commandes.filter((o) => o.client_id === c.id && o.statut === 'credit')
         .reduce((s, o) => s + Math.max(0, o.total - ((o.montant_paye || 0) - (o.rendu || 0))), 0);
-      return { id: c.id, nom: c.nom, telephone: c.telephone, statut: c.statut, du };
+      return { id: c.id, nom: c.nom, telephone: c.telephone, statut: c.statut, suppression_demandee_at: c.suppression_demandee_at || null, du };
+    },
+    async demanderSuppression(id, token, motif) {
+      const c = this.db().clients.find((x) => x.id === id && x.token === token);
+      if (!c) throw new Error('Client inconnu.');
+      c.suppression_demandee_at = c.suppression_demandee_at || now(); c.suppression_motif = (motif || '').trim().slice(0, 300) || null;
+      this._save();
+    },
+    async annulerSuppression(id, token) {
+      const c = this.db().clients.find((x) => x.id === id && x.token === token);
+      if (!c) throw new Error('Client inconnu.');
+      c.suppression_demandee_at = null; c.suppression_motif = null; this._save();
     },
     async placeOrder(id, token, lignes, moyen, note, extra = {}) {
       const db = this.db();
@@ -215,6 +229,8 @@
       const mode = extra.mode_retrait || null;
       if (mode && !MODES.includes(mode)) throw new Error('Mode de retrait invalide.');
       if (mode === 'livraison' && (extra.adresse || '').trim().length < 3) throw new Error('Indiquez l\'adresse de livraison.');
+      if (moyen === 'credit' && !opt(b, 'paiement_credit')) throw new Error('Le paiement à crédit n\'est pas proposé par cette boutique.');
+      if (mode === 'livraison' && !opt(b, 'livraison')) throw new Error('Cette boutique ne propose pas la livraison.');
       const dateResa = extra.date_reservation || null;
       if (dateResa && dateResa < today()) throw new Error('La date choisie est déjà passée.');
       const out = []; let total = 0; let menuDate = null;
@@ -328,10 +344,10 @@
     async majBoutique(id, patch) {
       const b = this._bq(id);
       if (!b) throw new Error('Boutique introuvable.');
-      const proteges = ['statut', 'paiement_valide', 'paiement_montant', 'slug', 'type', 'proprietaire_id', 'prefixe'];
+      const proteges = ['statut', 'paiement_valide', 'paiement_montant', 'slug', 'type', 'proprietaire_id', 'prefixe', 'options'];
       if (!this._moi()?.super) {
         this._exiger(id);
-        if (proteges.some((k) => k in patch && patch[k] !== b[k])) throw new Error('Modification réservée à l\'administrateur de la plateforme.');
+        if (proteges.some((k) => k in patch && JSON.stringify(patch[k]) !== JSON.stringify(b[k]))) throw new Error('Modification réservée à l\'administrateur de la plateforme.');
       }
       Object.assign(b, patch); this._save(); return clone(b);
     },
@@ -621,6 +637,8 @@
       return chkRpc(await this.sb.rpc('connexion_client', { p_boutique: this.boutique, p_telephone: telephone || '' }));
     },
     async getClient(id, token) { return chk(await this.sb.rpc('statut_client', { p_id: id, p_token: token })); },
+    async demanderSuppression(id, token, motif) { chkRpc(await this.sb.rpc('demander_suppression', { p_id: id, p_token: token, p_motif: motif || '' })); },
+    async annulerSuppression(id, token) { chkRpc(await this.sb.rpc('annuler_suppression', { p_id: id, p_token: token })); },
     async placeOrder(id, token, lignes, moyen, note, extra = {}) {
       return chk(await this.sb.rpc('passer_commande', {
         p_id: id, p_token: token, p_lignes: lignes, p_moyen: moyen, p_note: note || '',

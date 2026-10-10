@@ -29,7 +29,7 @@ Mode local : administrateur de la plateforme = identifiant **admin**, mot de pas
 
 1. Créez un projet sur https://supabase.com (région *Europe*).
 2. **SQL Editor** → **New query** → collez `supabase/schema.sql` → **Run**.
-3. Nouvelle requête → collez `supabase/migration_v2.sql` → **Run**, puis `supabase/migration_v3_vendeurs.sql`, puis `supabase/migration_v4_plateforme.sql` (plateforme multi-boutiques) (caisse par compte, matières, réservations, connexion par numéro, notifications).
+3. Nouvelle requête → collez `supabase/migration_v2.sql` → **Run**, puis `supabase/migration_v3_vendeurs.sql`, `supabase/migration_v4_plateforme.sql` (plateforme multi-boutiques) et `supabase/migration_v5_options.sql` (accès des boutiques, suppression de compte) (caisse par compte, matières, réservations, connexion par numéro, notifications).
 4. **Authentication → Users → Add user** : créez votre compte gérante (cochez *Auto Confirm User*), puis :
    ```sql
    insert into admins (email) values ('votre.email@exemple.com');
@@ -79,12 +79,25 @@ L'espace gérante est à l'adresse : `https://votre-site/admin.html` (à ajouter
 ### Valider (administrateur)
 **Demandes** → vérifier le paiement dans Wave → interrupteur **Paiement reçu** → **Valider et mettre en ligne** (message WhatsApp proposé). La boutique reçoit ses réglages et catégories de départ. **Boutiques** : suspendre, réactiver, gérer. **Réglages** : nom de la plateforme, frais de création, lien Wave, WhatsApp.
 
+### Accès de chaque boutique (administrateur)
+**Plateforme → Boutiques → Accès** (ou *Paramètres → Accès de la boutique*) :
+- **Valider les nouveaux clients** : comme Noecy, chaque client doit être accepté avant de commander ; désactivé, il commande dès son inscription.
+- **Paiement à crédit** : option « Payer plus tard » proposée ou non aux clients.
+- **Livraison** (restaurants) et **Points de vente** (vendeurs).
+Le gérant voit ses accès mais ne peut pas les modifier.
+
+### Comptes clients
+- Les clients voient toutes les boutiques (bouton en haut de chaque boutique, vitrine sur l'écran d'accueil) et choisissent où acheter. Leur nom et leur numéro sont pré-remplis quand ils s'inscrivent dans une nouvelle boutique.
+- Pas de changement de compte : le client peut **se déconnecter** (puis revenir avec son numéro) ou **demander la suppression** de son compte. La boutique valide ou refuse dans **Clients → Suppressions** ; les commandes passées restent dans l'historique.
+
 ### Restaurant
 - **Plats & carte** : la liste des plats (non comptés en stock).
 - **Menu du jour** : choisir les plats du jour, le nombre de portions (vide = sans limite), masquer/afficher un plat, reprendre un menu précédent, préparer les jours suivants.
 - **Publier** : le menu devient visible et les clients abonnés reçoivent une notification. Un plat passe « Épuisé » automatiquement ; une commande annulée libère ses portions.
 - Les clients choisissent **sur place, à emporter ou livraison** (adresse obligatoire) et l'heure souhaitée.
 - **Commandes** : À accepter → En cuisine → Prête (le client est prévenu) → Remise et encaissée. Tableau **Préparation en cuisine** par plat et bilan du jour.
+
+Guide complet pour activer les notifications sur Android, iPhone et ordinateur : **[GUIDE_NOTIFICATIONS.md](GUIDE_NOTIFICATIONS.md)** (aussi disponible dans l'application).
 
 ## 4. Le lien de paiement Wave
 

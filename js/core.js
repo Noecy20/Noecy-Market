@@ -315,3 +315,60 @@ if ('serviceWorker' in navigator && location.protocol !== 'file:') swRegistratio
 
 // Adresse de la boutique (même depuis admin.html)
 const urlBoutique = () => location.origin + location.pathname.replace(/admin\.html$/, '').replace(/index\.html$/, '');
+
+/* =====================================================================
+   Accès des boutiques (réglés par l'administrateur de la plateforme)
+   ===================================================================== */
+const OPTIONS_BQ = [
+  ['validation_clients', 'Valider les nouveaux clients', 'Chaque nouveau client doit être accepté par la boutique avant de commander. Sinon, il commande tout de suite.', 'user-check'],
+  ['paiement_credit', 'Paiement à crédit', 'Les clients peuvent choisir « Payer plus tard ».', 'handshake'],
+  ['livraison', 'Livraison', 'Les clients peuvent demander une livraison (restaurants).', 'bike'],
+  ['points_vente', 'Points de vente', 'La boutique peut créer des vendeurs qui vendent son stock.', 'store'],
+];
+const optionBq = (b, k) => ((b && b.options) || {})[k] !== false;
+
+/* =====================================================================
+   Guide : recevoir les notifications
+   ===================================================================== */
+function guideNotifications({ role = 'client', activer = null } = {}) {
+  const ios = isIOS, android = /android/i.test(navigator.userAgent);
+  const appareil = ios ? 'iphone' : android ? 'android' : 'ordinateur';
+  const etapes = {
+    android: ['Ouvrez le site dans <b>Chrome</b>.', 'Menu <b>⋮</b> en haut à droite → <b>« Ajouter à l\'écran d\'accueil »</b> (ou « Installer l\'application »).', 'Ouvrez l\'application depuis la nouvelle icône.',
+      `Touchez <b>${role === 'client' ? '« Recevoir les notifications »' : '« Activer sur cet appareil »'}</b>, puis <b>Autoriser</b>.`],
+    iphone: ['Ouvrez le site dans <b>Safari</b> (pas Chrome). iOS 16.4 ou plus récent est nécessaire.', 'Touchez <b>Partager</b> (carré avec une flèche) → <b>« Sur l\'écran d\'accueil »</b> → Ajouter.', 'Fermez Safari et ouvrez l\'application <b>depuis la nouvelle icône</b>.',
+      `Touchez <b>${role === 'client' ? '« Recevoir les notifications »' : '« Activer sur cet appareil »'}</b>, puis <b>Autoriser</b>.`],
+    ordinateur: ['Utilisez <b>Chrome</b>, <b>Edge</b> ou <b>Firefox</b>.', `Cliquez sur <b>${role === 'client' ? '« Recevoir les notifications »' : '« Activer sur cet appareil »'}</b>.`, 'Quand le navigateur demande l\'autorisation, cliquez sur <b>Autoriser</b>.'],
+  };
+  const bloque = {
+    android: 'Touchez le cadenas à gauche de l\'adresse → <b>Autorisations</b> → <b>Notifications</b> → Autoriser. Dans les réglages du téléphone, autorisez aussi Chrome à fonctionner en arrière-plan.',
+    iphone: 'Ouvrez <b>Réglages</b> de l\'iPhone → <b>Notifications</b> → choisissez l\'application → <b>Autoriser les notifications</b>.',
+    ordinateur: 'Cliquez sur le cadenas à gauche de l\'adresse → <b>Notifications</b> → Autoriser, puis rechargez la page.',
+  };
+  const onglet = (k, l, i) => `<button type="button" data-g="${k}" class="${k === appareil ? 'on' : ''}">${ic(i)} ${l}</button>`;
+  const recoit = role === 'client'
+    ? ['Votre compte est validé', 'Votre commande est acceptée, prête ou remise', 'Le menu du jour est publié (restaurants)', 'Rappel s\'il reste un montant à payer']
+    : role === 'super'
+      ? ['Nouvelle demande de boutique', 'Résumé du matin de chaque boutique']
+      : ['Nouvelle commande ou réservation', 'Nouveau client à valider, demande de suppression de compte', 'Vente d\'un de vos vendeurs', 'Résumé chaque matin à 9 h'];
+  modal({
+    title: `${ic('bell-ring')} Recevoir les notifications`,
+    body: `<p class="muted" style="margin-bottom:12px">Une fois activées, vous êtes prévenu(e) même quand l'application est fermée.</p>
+      <div class="guide-recoit">${recoit.map((x) => `<span>${ic('check', 'sm')} ${x}</span>`).join('')}</div>
+      <div class="seg seg-full" id="gd-tabs" style="margin:14px 0">${onglet('android', 'Android', 'smartphone')}${onglet('iphone', 'iPhone', 'smartphone')}${onglet('ordinateur', 'Ordinateur', 'monitor')}</div>
+      ${Object.entries(etapes).map(([k, et]) => `<div class="guide-pane ${k === appareil ? '' : 'hidden'}" data-p="${k}">
+        <ol class="guide-etapes">${et.map((e) => `<li>${e}</li>`).join('')}</ol>
+        <div class="note-box info small">${ic('shield-alert')}<span><b>Notifications bloquées ?</b> ${bloque[k]}</span></div></div>`).join('')}
+      <p class="small muted" style="margin-top:12px">Chaque téléphone doit être activé une fois. Si vous changez de téléphone ou effacez les données du navigateur, réactivez-les.</p>`,
+    foot: `<button class="btn ghost" data-close>Fermer</button>${activer ? `<button class="btn primary" id="gd-ok">${ic('bell-ring')} Activer maintenant</button>` : ''}`,
+    onMount: (el, close) => {
+      $('#gd-tabs', el).onclick = (e) => {
+        const b = e.target.closest('[data-g]'); if (!b) return;
+        $$('#gd-tabs button', el).forEach((x) => x.classList.toggle('on', x === b));
+        $$('.guide-pane', el).forEach((x) => x.classList.toggle('hidden', x.dataset.p !== b.dataset.g));
+      };
+      const ok = $('#gd-ok', el);
+      if (ok) ok.onclick = () => { close(); activer(); };
+    },
+  });
+}

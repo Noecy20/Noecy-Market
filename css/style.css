@@ -1180,3 +1180,24 @@ input.color-big { width: 100%; height: 46px; border: 0; border-radius: 12px; pad
   .mi .mi-stat:nth-of-type(2) { display: none; }
   .vt-grid { grid-template-columns: 1fr; }
 }
+
+/* Profil client : reste à payer centré sous commandes et articles */
+.profil-stats { grid-template-columns: 1fr 1fr !important; }
+.profil-stats .pstat.reste { grid-column: 1 / -1; align-items: center; text-align: center; }
+.profil-stats .pstat.reste .btn { align-self: center; }
+.profil-compte { display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; margin: 4px 0 20px; }
+.profil-compte .danger-txt { margin-right: 0; }
+/* Accès de la boutique */
+.acces-liste { display: grid; gap: 8px; }
+.acces { display: flex; align-items: center; gap: 12px; padding: 10px 12px; border-radius: 14px; background: #fcf8fa; opacity: .7; }
+.acces.on { opacity: 1; }
+.acces .ac-ic { width: 34px; height: 34px; border-radius: 11px; display: grid; place-items: center; background: #fff; color: var(--plum2); flex: none; }
+.acces > span:nth-child(2) { flex: 1; min-width: 0; }
+.acces b, .acces small { display: block; }
+.acces small { color: var(--muted); font-size: 12px; }
+/* Guide des notifications */
+.guide-recoit { display: grid; gap: 6px; padding: 12px 14px; border-radius: 14px; background: var(--leaf-soft); color: #0f6b47; font-size: 14px; }
+.guide-recoit span { display: flex; align-items: center; gap: 8px; }
+.guide-etapes { margin: 0 0 12px; padding: 0; list-style: none; counter-reset: e; display: grid; gap: 10px; }
+.guide-etapes li { counter-increment: e; display: flex; gap: 12px; align-items: flex-start; font-size: 14.5px; }
+.guide-etapes li::before { content: counter(e); width: 26px; height: 26px; border-radius: 9px; background: var(--grad); color: #fff; font-weight: 800; display: grid; place-items: center; flex: none; font-size: 13px; }
