@@ -18,7 +18,9 @@ self.addEventListener('push', (e) => {
 
 self.addEventListener('notificationclick', (e) => {
   e.notification.close();
-  const url = new URL(e.notification.data && e.notification.data.url ? e.notification.data.url : '/', self.location.origin).href;
+  // Les adresses reçues (« /admin.html#… ») sont résolues dans le dossier du site (ex. GitHub Pages : /Noecy-Market/)
+  const brut = (e.notification.data && e.notification.data.url) || '/';
+  const url = new URL(brut.replace(/^\//, ''), self.registration.scope).href;
   e.waitUntil(self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((list) => {
     for (const c of list) {
       if (new URL(c.url).origin === self.location.origin && 'focus' in c) {

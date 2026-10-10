@@ -58,6 +58,9 @@ Ce qui est notifié :
 **Netlify Drop** : glissez le dossier sur https://app.netlify.com/drop (sans les fichiers `*.local.*`).
 Ou reliez le dépôt GitHub à Netlify / Vercel / Cloudflare Pages (aucune commande de build, dossier de publication `.`).
 
+**GitHub Pages** (gratuit, depuis ce dépôt) : *Settings → Pages → Build and deployment → Source : Deploy from a branch → Branch : `main` / `(root)` → Save*.
+Le site est alors à `https://noecy20.github.io/Noecy-Market/` et l'espace gérante à `https://noecy20.github.io/Noecy-Market/admin.html`. Chaque envoi sur `main` le met à jour en 1 à 2 minutes.
+
 L'espace gérante est à l'adresse : `https://votre-site/admin.html` (à ajouter à l'écran d'accueil du téléphone : icône sombre « Noecy Gérante », séparée de la boutique).
 
 ---
