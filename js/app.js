@@ -10,6 +10,12 @@ function setManifest(admin) {
   if (l) l.setAttribute('href', admin ? 'manifest-admin.webmanifest' : 'manifest.webmanifest');
 }
 
+// Ouvre la fiche d'un client demandée depuis le tableau de bord
+function ouvrirFicheEnAttente() {
+  const id = A.nextClient; A.nextClient = '';
+  if (id && A.ready && client(id)) ACT['cli-detail']({ dataset: { id } });
+}
+
 async function route() {
   $('#modal-root').innerHTML = '';
   document.body.classList.remove('side-open');
@@ -17,13 +23,14 @@ async function route() {
   if (h.startsWith('#/admin')) {
     const page = h.split('/')[2] || 'dashboard';
     A.page = PAGES[page] ? page : 'dashboard';
-    A.f.q = '';
+    A.f.q = A.nextQ || ''; A.nextQ = '';
     setManifest(true);
-    if (CURRENT === 'admin' && A.ready) { renderPage(); return; }
+    if (CURRENT === 'admin' && A.ready) { renderPage(); ouvrirFicheEnAttente(); return; }
     stopShop();
     window.onscroll = null;
     CURRENT = 'admin';
     await startAdmin();
+    ouvrirFicheEnAttente();
   } else {
     setManifest(false);
     // Un lien de connexion client relance la boutique même si elle est déjà ouverte

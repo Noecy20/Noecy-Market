@@ -231,7 +231,17 @@ Object.assign(ACT, {
     if (location.hash === '#/admin') route(); else location.hash = '#/admin';
   },
   'refresh': (el) => run(el, async () => { await refreshAfter(); toast('Données à jour'); }),
-  'goto': (el) => { if (el.dataset.f) A.f.cmd = el.dataset.f; location.hash = '#/admin/' + el.dataset.page; },
+  'goto': (el) => {
+    const d = el.dataset;
+    if (d.f) A.f.cmd = d.f;
+    if (d.gltype) { A.f.glType = d.gltype; A.f.glCompte = 'tous'; A.f.gl = A.periode; }
+    if (d.inv) A.f.inv = d.inv;
+    if (d.clitab) A.f.cli = d.clitab;
+    A.nextQ = d.q || '';
+    A.nextClient = d.client || '';
+    const cible = '#/admin/' + d.page;
+    if (location.hash === cible) route(); else location.hash = cible;
+  },
   'periode': (el) => { A.periode = el.dataset.p; renderPage(); },
 });
 INP['adm-q'] = debounce((el) => {
@@ -241,7 +251,9 @@ INP['adm-q'] = debounce((el) => {
   const n = $('[data-inp="adm-q"]'); if (n) { n.focus(); n.setSelectionRange(pos, pos); }
 }, 250);
 
-const kpi = (label, val, icon, cls, isMoney, sub = '', i = 0, page = '') => `<div class="kpi ${cls} ${page ? 'link' : ''}" style="--i:${i}" ${page ? `data-act="goto" data-page="${page}"` : ''}>
+// Attributs de navigation : go('caisse', { gltype: 'entree' }) → data-act="goto" data-page=… data-gltype=…
+const go = (page, opts = {}) => `data-act="goto" data-page="${page}"` + Object.entries(opts).map(([k, v]) => ` data-${k}="${esc(v)}"`).join('');
+const kpi = (label, val, icon, cls, isMoney, sub = '', i = 0, nav = '') => `<div class="kpi ${cls} ${nav ? 'link' : ''}" style="--i:${i}" ${nav ? (nav.includes('data-') ? nav : go(nav)) : ''}>
   <div class="ki">${ic(icon)}</div><div class="kl">${label}</div>
   <div class="kv" data-count="${Math.round(val)}" ${isMoney ? 'data-money' : ''}>0</div>${sub ? `<div class="ks">${sub}</div>` : ''}</div>`;
 
@@ -355,7 +367,7 @@ function computeStats() {
       pp.q += Number(l.quantite); pp.ca += l.prix * l.quantite;
     });
     const k = c.client_id || 'passage:' + c.client_nom;
-    const pc = parClient[k] || (parClient[k] = { nom: c.client_nom, n: 0, ca: 0 });
+    const pc = parClient[k] || (parClient[k] = { id: c.client_id, nom: c.client_nom, n: 0, ca: 0 });
     pc.n++; pc.ca += c.total;
   });
   const today = dayKey();
@@ -373,6 +385,8 @@ function computeStats() {
     serie: { labels, ca: serieCA, enc: serieEnc },
     parCat, topProd: Object.entries(parProd).sort((a, b) => b[1].q - a[1].q).slice(0, 5),
     topClients: Object.values(parClient).sort((a, b) => b.ca - a.ca).slice(0, 5),
+    meilleurClient: meilleurClientDe(ventes.length ? ventes : A.commandes.filter(isLivree)),
+    meilleurClientTout: !ventes.length,
     enAttente: A.commandes.filter((c) => c.statut === 'en_attente'),
     clientsAttente: A.clients.filter((c) => c.statut === 'en_attente'),
     resas,
@@ -429,6 +443,39 @@ ACT['alert-hide'] = (el) => {
   setTimeout(() => box.remove(), 350);
 };
 
+/* ---------- Meilleurs clients / produits ---------- */
+function meilleurClientDe(cmds) {
+  const m = {};
+  cmds.forEach((c) => {
+    const k = c.client_id || 'passage:' + c.client_nom;
+    const g = m[k] || (m[k] = { id: c.client_id, nom: c.client_nom, n: 0, ca: 0, articles: 0 });
+    g.n++; g.ca += Number(c.total) || 0; g.articles += sum(c.lignes || [], 'quantite');
+  });
+  return Object.values(m).sort((a, b) => b.ca - a.ca)[0] || null;
+}
+// Client inscrit → sa fiche ; client de passage → ses commandes
+const navClient = (v) => (v.id ? go('clients', { clitab: 'valide', client: v.id }) : go('commandes', { f: 'toutes', q: v.nom }));
+
+function championsHtml(s) {
+  const bc = s.meilleurClient;
+  const bp = s.topProd[0];
+  const periode = { 7: '7 derniers jours', 30: '30 derniers jours', mois: 'ce mois', tout: 'depuis le début' }[A.periode];
+  return `<div class="champions">
+    <div class="champ ${bc ? 'link' : ''}" ${bc ? navClient(bc) : ''}>
+      <span class="champ-ic gold">${ic('crown')}</span>
+      <div class="champ-txt"><small>Meilleur client · ${s.meilleurClientTout ? 'depuis le début' : periode}</small>
+        ${bc ? `<b>${esc(bc.nom)}</b><span>${money(bc.ca)} · ${bc.n} commande(s) · ${num(bc.articles)} article(s)</span>` : '<b>—</b><span>Pas encore de vente</span>'}</div>
+      ${bc ? `<span class="champ-go">${ic('chevron-right')}</span>` : ''}
+    </div>
+    <div class="champ ${bp ? 'link' : ''}" ${bp ? go('produits', { q: bp[1].nom }) : ''}>
+      <span class="champ-ic">${ic('trophy')}</span>
+      <div class="champ-txt"><small>Produit le plus vendu · ${periode}</small>
+        ${bp ? `<b>${esc(bp[1].nom)}</b><span>${num(bp[1].q)} vendu(s) · ${money(bp[1].ca)}</span>` : '<b>—</b><span>Pas encore de vente</span>'}</div>
+      ${bp ? `<span class="champ-go">${ic('chevron-right')}</span>` : ''}
+    </div>
+  </div>`;
+}
+
 /* ---------- Tableau de bord ---------- */
 PAGES.dashboard = {
   title: 'Tableau de bord',
@@ -447,32 +494,33 @@ PAGES.dashboard = {
     ${al.length ? `<div class="alerts">${al.map((a, i) => `<div class="alert ${a.lvl}" style="--i:${i}"><span class="ai">${ic(a.icon)}</span><span class="at">${a.txt}</span><button class="btn sm ghost" data-act="goto" data-page="${a.page}" ${a.f ? `data-f="${a.f}"` : ''}>${a.btn}</button><button class="icon-btn flat alert-x" data-act="alert-hide" data-k="${esc(a.k)}" title="Masquer pour aujourd'hui">${ic('x')}</button></div>`).join('')}</div>`
       : `<div class="alerts"><div class="alert ok"><span class="ai">${ic('circle-check')}</span><span class="at">Tout est sous contrôle pour le moment.</span></div></div>`}
     <div class="kpis">
-      ${kpi("Chiffre d'affaires", s.ca, 'coins', '', true, `${s.nbVentes} vente(s) · ${num(s.articles)} article(s)`, 0)}
-      ${kpi('Encaissé', s.encaisse, 'wallet', 'leaf', true, 'Argent réellement reçu', 1, 'caisse')}
-      ${kpi('Bénéfice', s.benef, 'piggy-bank', 'mango', true, `Marge ${pct(s.marge)}`, 2, 'rentabilite')}
-      ${kpi('Dépenses', s.depenses, 'receipt', 'caramel', true, 'Achats, fabrication, prélèvements', 3, 'caisse')}
-      ${kpi('Caisse', s.soldes.especes + s.soldes.wave, 'landmark', '', true, `Espèces ${money(s.soldes.especes)} · Wave ${money(s.soldes.wave)}`, 4, 'caisse')}
-      ${kpi('Crédits clients', s.creances, 'hand-coins', 'danger', true, `${s.nbCredits} commande(s) à crédit`, 5, 'relances')}
-      ${kpi('Nous devons', s.devons, 'undo-2', 'caramel', true, 'Monnaie, avances, remboursements', 6, 'relances')}
-      ${kpi('Valeur du stock', s.valeurStock, 'boxes', 'leaf', true, `${num(s.unitesStock)} unité(s) · panier moyen ${money(s.panier)}`, 7, 'inventaire')}
+      ${kpi("Chiffre d'affaires", s.ca, 'coins', '', true, `${s.nbVentes} vente(s) · ${num(s.articles)} article(s)`, 0, go('commandes', { f: 'toutes' }))}
+      ${kpi('Encaissé', s.encaisse, 'wallet', 'leaf', true, 'Argent réellement reçu', 1, go('caisse', { gltype: 'entree' }))}
+      ${kpi('Bénéfice', s.benef, 'piggy-bank', 'mango', true, `Marge ${pct(s.marge)}`, 2, go('rentabilite'))}
+      ${kpi('Dépenses', s.depenses, 'receipt', 'caramel', true, 'Achats, fabrication, prélèvements', 3, go('caisse', { gltype: 'sortie' }))}
+      ${kpi('Caisse', s.soldes.especes + s.soldes.wave, 'landmark', '', true, `Espèces ${money(s.soldes.especes)} · Wave ${money(s.soldes.wave)}`, 4, go('caisse', { gltype: 'tous' }))}
+      ${kpi('Crédits clients', s.creances, 'hand-coins', 'danger', true, `${s.nbCredits} commande(s) à crédit`, 5, go('relances'))}
+      ${kpi('Nous devons', s.devons, 'undo-2', 'caramel', true, 'Monnaie, avances, remboursements', 6, go('commandes', { f: 'devons' }))}
+      ${kpi('Valeur du stock', s.valeurStock, 'boxes', 'leaf', true, `${num(s.unitesStock)} unité(s) · panier moyen ${money(s.panier)}`, 7, go('inventaire', { inv: 'produits' }))}
     </div>
+    ${championsHtml(s)}
     <div class="dash-grid">
-      <div class="card span2"><div class="card-head"><h3>Évolution des ventes</h3><span class="small muted">Chiffre d'affaires vs encaissé</span></div><div class="chart-box"><canvas id="ch-ventes"></canvas></div></div>
-      <div class="card"><div class="card-head"><h3>Ventes par catégorie</h3></div>${Object.keys(s.parCat).length ? '<div class="chart-box sm"><canvas id="ch-cat"></canvas></div>' : `<div class="empty" style="padding:30px 0"><span class="big">${ic('chart-pie')}</span><p>Pas encore de ventes sur la période.</p></div>`}</div>
-      <div class="card"><div class="card-head"><h3>Réservations à venir</h3><span class="small muted">${s.resas.length}</span></div>
-        ${s.resas.length ? `<ul class="rank">${s.resas.slice(0, 6).map((c) => `<li><span class="pos date-pos"><b>${toDate(c.date_reservation).getDate()}</b><small>${toDate(c.date_reservation).toLocaleDateString('fr-FR', { month: 'short' })}</small></span><div class="rn"><b>${esc(c.client_nom)}</b><span class="small muted">${(c.lignes || []).map((l) => `${l.quantite}× ${esc(l.nom)}`).join(', ')}${c.heure_reservation ? ' · ' + esc(c.heure_reservation) : ''}</span></div><div class="rv">${money(c.total)}</div></li>`).join('')}</ul>
+      <div class="card span2"><div class="card-head link" ${go('commandes', { f: 'toutes' })}><h3>Évolution des ventes ${ic('chevron-right', 'sm go-ic')}</h3><span class="small muted">Chiffre d'affaires vs encaissé</span></div><div class="chart-box"><canvas id="ch-ventes"></canvas></div></div>
+      <div class="card"><div class="card-head link" ${go('produits')}><h3>Ventes par catégorie ${ic('chevron-right', 'sm go-ic')}</h3></div>${Object.keys(s.parCat).length ? '<div class="chart-box sm"><canvas id="ch-cat"></canvas></div>' : `<div class="empty" style="padding:30px 0"><span class="big">${ic('chart-pie')}</span><p>Pas encore de ventes sur la période.</p></div>`}</div>
+      <div class="card"><div class="card-head link" ${go('commandes', { f: 'reservee' })}><h3>Réservations à venir ${ic('chevron-right', 'sm go-ic')}</h3><span class="small muted">${s.resas.length}</span></div>
+        ${s.resas.length ? `<ul class="rank">${s.resas.slice(0, 6).map((c) => `<li class="link" ${go('commandes', { f: 'reservee', q: c.numero })}><span class="pos date-pos"><b>${toDate(c.date_reservation).getDate()}</b><small>${toDate(c.date_reservation).toLocaleDateString('fr-FR', { month: 'short' })}</small></span><div class="rn"><b>${esc(c.client_nom)}</b><span class="small muted">${(c.lignes || []).map((l) => `${l.quantite}× ${esc(l.nom)}`).join(', ')}${c.heure_reservation ? ' · ' + esc(c.heure_reservation) : ''}</span></div><div class="rv">${money(c.total)}</div></li>`).join('')}</ul>
           <button class="btn soft block" style="margin-top:14px" data-act="goto" data-page="commandes" data-f="reservee">Toutes les réservations</button>` : '<p class="muted">Aucune réservation prévue.</p>'}
       </div>
-      <div class="card"><div class="card-head"><h3>Meilleurs produits</h3><span class="small muted">Quantités</span></div>
-        ${s.topProd.length ? `<ul class="rank">${s.topProd.map(([, v], i) => `<li><span class="pos">${i + 1}</span><div class="rn"><b>${esc(v.nom)}</b><div class="bar"><i style="width:${(v.q / maxQ) * 100}%"></i></div></div><div class="rv">${num(v.q)}<br><span class="small muted">${money(v.ca)}</span></div></li>`).join('')}</ul>` : '<p class="muted">Aucune vente sur la période.</p>'}
+      <div class="card"><div class="card-head link" ${go('rentabilite')}><h3>Meilleurs produits ${ic('chevron-right', 'sm go-ic')}</h3><span class="small muted">Quantités</span></div>
+        ${s.topProd.length ? `<ul class="rank">${s.topProd.map(([, v], i) => `<li class="link" ${go('produits', { q: v.nom })}><span class="pos">${i + 1}</span><div class="rn"><b>${esc(v.nom)}</b><div class="bar"><i style="width:${(v.q / maxQ) * 100}%"></i></div></div><div class="rv">${num(v.q)}<br><span class="small muted">${money(v.ca)}</span></div></li>`).join('')}</ul>` : '<p class="muted">Aucune vente sur la période.</p>'}
       </div>
-      <div class="card"><div class="card-head"><h3>Meilleurs clients</h3><span class="small muted">Montant</span></div>
-        ${s.topClients.length ? `<ul class="rank">${s.topClients.map((v, i) => `<li><span class="pos">${i + 1}</span><div class="rn"><b>${esc(v.nom)}</b><div class="bar leaf"><i style="width:${(v.ca / maxC) * 100}%"></i></div></div><div class="rv">${money(v.ca)}<br><span class="small muted">${v.n} cmd</span></div></li>`).join('')}</ul>` : '<p class="muted">Aucun client sur la période.</p>'}
+      <div class="card"><div class="card-head link" ${go('clients', { clitab: 'valide' })}><h3>Meilleurs clients ${ic('chevron-right', 'sm go-ic')}</h3><span class="small muted">Montant</span></div>
+        ${s.topClients.length ? `<ul class="rank">${s.topClients.map((v, i) => `<li class="link" ${navClient(v)}><span class="pos">${i + 1}</span><div class="rn"><b>${esc(v.nom)}</b><div class="bar leaf"><i style="width:${(v.ca / maxC) * 100}%"></i></div></div><div class="rv">${money(v.ca)}<br><span class="small muted">${v.n} cmd</span></div></li>`).join('')}</ul>` : '<p class="muted">Aucun client sur la période.</p>'}
       </div>
-      <div class="card span3"><div class="card-head"><h3>À traiter</h3></div>
+      <div class="card span3"><div class="card-head link" ${go('commandes', { f: 'en_attente' })}><h3>À traiter ${ic('chevron-right', 'sm go-ic')}</h3></div>
         ${s.enAttente.length || s.clientsAttente.length ? `<ul class="rank cols">
-          ${s.clientsAttente.slice(0, 4).map((c) => `<li><span class="avatar sm">${esc(initials(c.nom))}</span><div class="rn"><b>${esc(c.nom)}</b><span class="small muted">Nom à valider</span></div><button class="btn sm leaf" data-act="cli-valider" data-id="${esc(c.id)}">${ic('check')}</button></li>`).join('')}
-          ${s.enAttente.slice(0, 6).map((c) => `<li><span class="pos">${ic('receipt')}</span><div class="rn"><b>${esc(c.numero)} · ${esc(c.client_nom)}</b><span class="small muted">${fDateTime(c.created_at)}</span></div><div class="rv">${money(c.total)}</div></li>`).join('')}
+          ${s.clientsAttente.slice(0, 4).map((c) => `<li class="link" ${go('clients', { clitab: 'en_attente', q: c.nom })}><span class="avatar sm">${esc(initials(c.nom))}</span><div class="rn"><b>${esc(c.nom)}</b><span class="small muted">Nom à valider</span></div><button class="btn sm leaf" data-act="cli-valider" data-id="${esc(c.id)}">${ic('check')}</button></li>`).join('')}
+          ${s.enAttente.slice(0, 6).map((c) => `<li class="link" ${go('commandes', { f: 'en_attente', q: c.numero })}><span class="pos">${ic('receipt')}</span><div class="rn"><b>${esc(c.numero)} · ${esc(c.client_nom)}</b><span class="small muted">${fDateTime(c.created_at)}</span></div><div class="rv">${money(c.total)}</div></li>`).join('')}
         </ul><button class="btn soft block" style="margin-top:14px" data-act="goto" data-page="commandes" data-f="en_attente">Voir les commandes</button>` : '<p class="muted">Rien en attente.</p>'}
       </div>
     </div>`;
@@ -659,7 +707,7 @@ function orderCard(c, i) {
   const btn = (act, cls, icon, txt, extra = '') => `<button class="btn ${cls} sm" data-act="${act}" data-id="${id}" ${extra}>${ic(icon)} ${txt}</button>`;
   let actions = [];
   if (c.statut === 'en_attente' || c.statut === 'reservee') {
-    actions.push(btn('cmd-livrer', 'leaf', 'check', 'Remettre & encaisser'));
+    actions.push(btn('cmd-livrer', 'leaf main', 'check', 'Remettre & encaisser'));
     actions.push(btn('cmd-credit', 'mango', 'hand-coins', 'À crédit'));
     actions.push(c.statut === 'en_attente' ? btn('cmd-reserver', 'soft', 'calendar-check', 'Réserver') : btn('cmd-encaisser', 'soft', 'banknote', 'Avance'));
     actions.push(btn('cmd-annuler', 'ghost icon-only', 'x', '', 'title="Annuler"'));

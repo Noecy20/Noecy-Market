@@ -842,3 +842,33 @@ button.status-card { border: 0; color: #fff; cursor: pointer; text-align: left; 
   .cart-line .lt { min-width: 64px; font-size: 14px; }
   .pay-opt { padding: 11px 12px; }
 }
+
+/* Tableau de bord : cartes cliquables et champions */
+.card-head.link, .rank li.link, .champ.link { cursor: pointer; }
+.card-head.link h3 { display: inline-flex; align-items: center; gap: 4px; }
+.card-head.link .go-ic { opacity: 0; transform: translateX(-4px); transition: .25s var(--ease); color: var(--plum2); }
+.card-head.link:hover .go-ic, .card:hover .card-head.link .go-ic { opacity: 1; transform: none; }
+.rank li.link { border-radius: 12px; margin: -4px -6px; padding: 4px 6px; transition: background .2s; }
+.rank li.link:hover { background: #fcf5f8; }
+.kpi.link::before { content: ''; position: absolute; right: 14px; bottom: 14px; width: 8px; height: 8px; border-top: 2px solid var(--muted); border-right: 2px solid var(--muted); transform: rotate(45deg); opacity: .35; transition: .25s; z-index: 1; }
+.kpi.link:hover::before { opacity: .9; right: 11px; }
+.champions { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-bottom: 18px; }
+.champ {
+  display: flex; align-items: center; gap: 14px; padding: 16px 18px; border-radius: var(--r); background: #fff; box-shadow: var(--sh);
+  position: relative; overflow: hidden; transition: transform .35s var(--spring), box-shadow .35s; animation: cardIn .6s .2s var(--ease) both;
+}
+.champ.link:hover { transform: translateY(-3px); box-shadow: 0 22px 40px -22px rgba(70,20,55,.45); }
+.champ::after { content: ''; position: absolute; inset: 0; background: linear-gradient(120deg, transparent 40%, rgba(246,166,9,.08) 50%, transparent 60%); background-size: 250% 100%; animation: shimmer 4s linear infinite; pointer-events: none; }
+.champ-ic { width: 48px; height: 48px; border-radius: 16px; display: grid; place-items: center; flex: none; background: var(--plum-soft); color: var(--plum2); }
+.champ-ic.gold { background: linear-gradient(135deg, #ffe8a8, #f6a609); color: #6b4300; box-shadow: 0 10px 20px -10px #f6a609; }
+.champ-ic .ic { width: 24px; height: 24px; }
+.champ-txt { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.champ-txt small { color: var(--muted); font-weight: 600; font-size: 12.5px; }
+.champ-txt b { font-size: 19px; letter-spacing: -.02em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.champ-txt span { font-size: 13px; color: var(--ink2); }
+.champ-go { color: var(--muted); flex: none; transition: transform .25s var(--ease); }
+.champ.link:hover .champ-go { transform: translateX(3px); color: var(--plum2); }
+/* Bouton principal d'une commande : seul sur sa ligne */
+.oc-actions .btn { min-width: 0; }
+.oc-actions .btn.main { flex: 1 1 100%; }
+@media (max-width: 720px) { .champions { grid-template-columns: 1fr; gap: 10px; } .champ { padding: 14px; } }
