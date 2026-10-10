@@ -43,7 +43,7 @@ async function startShop() {
   SHOP.sig = shopSig();
   cleanCart();
   await refreshClient();
-  renderShop();
+  renderShopView();
   if (viaLien && SHOP.client) toast(`Bienvenue ${SHOP.client.nom}, vous êtes connecté(e).`);
   if (!SHOP.client) askName();
   SHOP.poll = setInterval(shopPoll, 10000);
@@ -85,7 +85,10 @@ async function shopPoll() {
   }
   const afterOrders = SHOP.commandes.map((c) => c.id + c.statut).join();
   if (beforeOrders && beforeOrders !== afterOrders) toast('Le statut de votre commande a changé', 'info');
-  if (before !== after || beforeDu !== SHOP.client?.du || beforeOrders !== afterOrders) renderStatus();
+  if (before !== after || beforeDu !== SHOP.client?.du || beforeOrders !== afterOrders) {
+    renderStatus();
+    if (estProfil() && !$('.modal-wrap')) renderProfil(false);
+  }
   const sig = shopSig();
   if (sig !== SHOP.sig) { SHOP.sig = sig; cleanCart(); renderGrid(false); updateCartUI(false); }
 }
@@ -97,7 +100,7 @@ function renderShop() {
     <header class="shop-top" id="shop-top">
       <a class="brand" href="#/"><span class="brand-logo">N</span><span class="brand-name">Noecy <b>Market</b></span></a>
       <div class="top-actions">
-        <button class="icon-btn" data-act="my-orders" title="Mon compte et mes commandes" aria-label="Mon compte">${ic('user-round')}</button>
+        <button class="icon-btn" data-act="go-profil" title="Mon profil" aria-label="Mon profil">${ic('user-round')}</button>
         <button class="cart-btn" data-act="open-cart" id="cart-btn">${ic('shopping-bag')}<span class="hide-sm">Panier</span><span class="badge" id="cart-count">0</span></button>
       </div>
     </header>
@@ -284,6 +287,7 @@ Object.assign(ACT, {
   'view-product': (el) => viewProduct(el.dataset.id),
   'open-cart': () => openCart(),
   'my-orders': () => openMyOrders(),
+  'go-profil': () => { if (!SHOP.client) return askName(); location.hash = '#/profil'; },
   'client-push': (el) => run(el, async () => {
     const sub = await subscribePush();
     await DB.savePushClient(SHOP.client.id, SHOP.client.token, sub);
@@ -294,7 +298,7 @@ Object.assign(ACT, {
     if (!(await confirmBox('Se déconnecter de ce téléphone ? Vous pourrez revenir avec votre numéro de téléphone.', { ok: 'Se déconnecter' }))) return;
     localStorage.removeItem(LS_CLIENT);
     SHOP.client = null; SHOP.commandes = []; SHOP.cart = {}; saveCart();
-    renderShop(); askName();
+    location.hash = '#/'; renderShop(); askName();
   },
 });
 INP['shop-q'] = debounce((el) => { SHOP.q = el.value; renderGrid(); }, 180);
@@ -491,7 +495,7 @@ function orderSuccess(cmd) {
            <a class="btn wave block lg" href="${esc(wl)}" target="_blank" rel="noopener">${ic('waves')} Payer ${money(partWave)} avec Wave</a></div>`
         : `<div class="wave-box"><p>Noecy vous enverra le lien de paiement Wave.</p></div>`) : ''}
     </div>`,
-    foot: `<button class="btn ghost" data-close data-act="my-orders">Mes commandes</button><button class="btn primary" data-close>Continuer mes achats</button>`,
+    foot: `<button class="btn ghost" data-close data-act="go-profil">Mes commandes</button><button class="btn primary" data-close>Continuer mes achats</button>`,
   });
 }
 
@@ -532,3 +536,148 @@ function openMyOrders() {
   }
   modal({ title: `${ic('user-round')} Mon compte`, size: 'drawer', body: compte + '<h4 class="cart-h">Mes commandes</h4>' + liste });
 }
+
+/* =====================================================================
+   Page « Mon profil » (#/profil)
+   ===================================================================== */
+const estProfil = () => (location.hash || '').startsWith('#/profil');
+const PROFIL = { cat: 'toutes' };
+
+// Choisit la vue de la boutique selon l'adresse
+function renderShopView() {
+  if (estProfil()) {
+    if (!SHOP.client) { history.replaceState(null, '', location.pathname + '#/'); renderShop(); askName('login'); return; }
+    renderProfil();
+  } else renderShop();
+}
+
+// Catégorie d'une ligne de commande (produit masqué ou supprimé → « Autres »)
+function catLigne(l) {
+  const p = SHOP.produits.find((x) => x.id === l.produit_id);
+  return (p && catOf(p.categorie_id)) || { id: 'autres', nom: 'Autres', icone: 'shopping-bag', couleur: '#8a7887' };
+}
+
+function statsProfil() {
+  const cmds = SHOP.commandes.filter((o) => o.statut !== 'annulee');
+  const parCat = {};
+  cmds.forEach((o) => (o.lignes || []).forEach((l) => {
+    const c = catLigne(l);
+    const g = parCat[c.id] || (parCat[c.id] = { cat: c, q: 0, montant: 0, produits: {}, commandes: new Set() });
+    g.q += Number(l.quantite); g.montant += l.prix * l.quantite; g.commandes.add(o.id);
+    const pr = g.produits[l.produit_id] || (g.produits[l.produit_id] = { id: l.produit_id, nom: l.nom, q: 0, montant: 0 });
+    pr.q += Number(l.quantite); pr.montant += l.prix * l.quantite;
+  }));
+  const premiere = SHOP.commandes.length ? SHOP.commandes[SHOP.commandes.length - 1].created_at : null;
+  return {
+    nb: cmds.length,
+    total: sum(cmds, 'total'),
+    articles: sum(cmds, (o) => sum(o.lignes || [], 'quantite')),
+    parCat: Object.values(parCat).sort((a, b) => b.montant - a.montant),
+    premiere,
+  };
+}
+
+function renderProfil(animate = true) {
+  const c = SHOP.client;
+  const st = statsProfil();
+  if (PROFIL.cat !== 'toutes' && !st.parCat.some((g) => g.cat.id === PROFIL.cat)) PROFIL.cat = 'toutes';
+  const sel = st.parCat.find((g) => g.cat.id === PROFIL.cat);
+  const maxM = Math.max(1, ...st.parCat.map((g) => g.montant));
+  const commandes = SHOP.commandes.filter((o) => PROFIL.cat === 'toutes' || (o.lignes || []).some((l) => catLigne(l).id === PROFIL.cat));
+  const wl = c.du > 0 ? waveLink(c.du) : '';
+  document.title = 'Mon profil · Noecy Market';
+  $('#app').innerHTML = `
+    <header class="shop-top" id="shop-top">
+      <a class="brand" href="#/"><span class="brand-logo">N</span><span class="brand-name">Noecy <b>Market</b></span></a>
+      <div class="top-actions">
+        <a class="btn ghost sm" href="#/">${ic('arrow-left')} <span class="hide-sm">Boutique</span></a>
+        <button class="cart-btn" data-act="open-cart" id="cart-btn">${ic('shopping-bag')}<span class="badge" id="cart-count">0</span></button>
+      </div>
+    </header>
+    <main class="profil ${animate ? 'enter' : ''}">
+      <section class="profil-hero">
+        <div class="blob b1"></div><div class="blob b2"></div>
+        <span class="profil-avatar">${esc(initials(c.nom))}</span>
+        <div class="profil-id">
+          <h1>${esc(c.nom)}</h1>
+          <p><span>${ic('phone', 'sm')} ${esc(c.telephone || '—')}</span>${st.premiere ? `<span>${ic('calendar-heart', 'sm')} cliente depuis le ${fDate(st.premiere)}</span>` : ''}</p>
+          <div class="profil-tags">${c.statut === 'valide' ? `<span class="pill ok">${ic('badge-check')} Compte validé</span>` : c.statut === 'en_attente' ? `<span class="pill warn">${ic('hourglass')} En attente de validation</span>` : '<span class="pill bad">Non validé</span>'}</div>
+        </div>
+        <div class="profil-actions">
+          ${DB.pushDisponible() ? `<button class="btn soft sm" data-act="client-push">${ic('bell-ring')} Notifications</button>` : ''}
+          <button class="btn ghost-light sm" data-act="client-logout">${ic('log-out')} Changer de compte</button>
+        </div>
+      </section>
+
+      <section class="profil-stats">
+        <div class="pstat"><span class="pi">${ic('receipt')}</span><small>Commandes</small><b data-count="${st.nb}">0</b></div>
+        <div class="pstat"><span class="pi">${ic('coins')}</span><small>Total dépensé</small><b data-count="${Math.round(st.total)}" data-money>0</b></div>
+        <div class="pstat"><span class="pi">${ic('package')}</span><small>Articles achetés</small><b data-count="${st.articles}">0</b></div>
+        <div class="pstat ${c.du > 0 ? 'due' : ''}"><span class="pi">${ic('hand-coins')}</span><small>Reste à payer</small><b>${money(c.du || 0)}</b>${wl ? `<a class="btn wave sm" href="${esc(wl)}" target="_blank" rel="noopener">Payer avec Wave</a>` : ''}</div>
+      </section>
+
+      <section class="profil-section">
+        <div class="ps-head"><h2>Mes achats par catégorie</h2></div>
+        ${st.parCat.length ? `
+          <div class="cat-bars">${st.parCat.map((g) => `<button class="cat-bar ${PROFIL.cat === g.cat.id ? 'on' : ''}" data-act="profil-cat" data-k="${esc(g.cat.id)}" style="--c:${esc(g.cat.couleur || '#6d1b4f')}">
+            <span class="cb-ic">${ic(g.cat.icone || 'shopping-bag')}</span>
+            <span class="cb-txt"><b>${esc(g.cat.nom)}</b><small>${num(g.q)} article(s) · ${g.commandes.size} commande(s)</small><span class="bar"><i style="width:${(g.montant / maxM) * 100}%;background:var(--c)"></i></span></span>
+            <span class="cb-m">${money(g.montant)}</span></button>`).join('')}</div>
+          <div class="chips" style="margin:16px 0 4px">
+            <button class="chip ${PROFIL.cat === 'toutes' ? 'on' : ''}" data-act="profil-cat" data-k="toutes">Toutes</button>
+            ${st.parCat.map((g) => `<button class="chip ${PROFIL.cat === g.cat.id ? 'on' : ''}" data-act="profil-cat" data-k="${esc(g.cat.id)}">${ic(g.cat.icone || 'shopping-bag')} ${esc(g.cat.nom)}</button>`).join('')}
+          </div>
+          ${sel ? `<div class="prod-favs">${Object.values(sel.produits).sort((a, b) => b.q - a.q).map((p) => {
+            const prd = prodS(p.id);
+            return `<div class="fav"><div class="thumb">${prd ? prodVisual(prd) : `<div class="pv pv-ph" style="--c:${esc(sel.cat.couleur)}">${ic(sel.cat.icone)}</div>`}</div>
+              <div class="fav-txt"><b>${esc(p.nom)}</b><small>${num(p.q)} acheté(s) · ${money(p.montant)}</small></div>
+              ${prd ? `<button class="btn soft sm" data-act="cart-add" data-id="${esc(p.id)}">${ic('plus')} Racheter</button>` : ''}</div>`;
+          }).join('')}</div>` : ''}`
+        : `<div class="empty" style="padding:30px 10px"><span class="big">${ic('shopping-bag')}</span><h3>Pas encore d'achat</h3><p>Vos achats apparaîtront ici, classés par catégorie.</p><a class="btn primary" href="#/" style="margin-top:14px">Découvrir les articles</a></div>`}
+      </section>
+
+      <section class="profil-section">
+        <div class="ps-head"><h2>Historique des commandes</h2><span class="muted small">${commandes.length} commande(s)${sel ? ' · ' + esc(sel.cat.nom) : ''}</span></div>
+        <div class="profil-orders">${commandes.length ? commandes.map((o, i) => {
+          const paye = (o.montant_paye || 0) - (o.rendu || 0);
+          const reste = Math.max(0, o.total - paye);
+          const wlo = o.statut !== 'annulee' && reste > 0 && ['wave', 'mixte'].includes(o.moyen_paiement) ? waveLink(reste) : '';
+          return `<div class="my-order po st-${o.statut}" style="--i:${i}">
+            <div class="top"><b>${esc(o.numero)}</b>${pillCmd(o.statut)}</div>
+            <span class="small muted">${fDateTime(o.created_at)} · ${PAY[o.moyen_paiement]?.label || ''}</span>
+            ${o.date_reservation ? `<div class="resa-line">${ic('calendar-days', 'sm')} Pour le ${fDate(o.date_reservation)}${o.heure_reservation ? ' · ' + esc(o.heure_reservation) : ''}</div>` : ''}
+            <div class="po-lines">${(o.lignes || []).map((l) => { const ct = catLigne(l); const hors = PROFIL.cat !== 'toutes' && ct.id !== PROFIL.cat; return `<span class="${hors ? 'dim' : ''}" style="--c:${esc(ct.couleur || '#6d1b4f')}">${ic(ct.icone || 'shopping-bag', 'sm')} ${l.quantite} × ${esc(l.nom)}</span>`; }).join('')}</div>
+            <div class="total-row"><span class="muted">Total</span><b>${money(o.total)}</b></div>
+            ${o.statut === 'credit' ? `<div class="total-row"><span class="muted">Reste à payer</span><b style="color:var(--danger)">${money(reste)}</b></div>` : ''}
+            <div class="po-act">
+              ${wlo ? `<a class="btn wave sm" href="${esc(wlo)}" target="_blank" rel="noopener">${ic('waves')} Payer</a>` : ''}
+              <button class="btn ghost sm" data-act="profil-recommander" data-id="${esc(o.id)}">${ic('repeat')} Recommander</button>
+            </div>
+          </div>`;
+        }).join('') : `<div class="empty" style="padding:24px 10px"><span class="big">${ic('receipt')}</span><p>Aucune commande${sel ? ' dans cette catégorie' : ''}.</p></div>`}</div>
+      </section>
+    </main>
+    <button class="fab-cart" id="fab-cart" data-act="open-cart"><span id="fab-txt"></span><span class="go">Voir le panier ${ic('arrow-right')}</span></button>`;
+  icons();
+  if (animate) { countUp($('.profil')); window.scrollTo({ top: 0 }); }
+  else $$('[data-count]', $('.profil')).forEach((x) => { x.textContent = x.hasAttribute('data-money') ? money(+x.dataset.count) : num(+x.dataset.count); });
+  updateCartUI(false);
+}
+
+Object.assign(ACT, {
+  'profil-cat': (el) => { PROFIL.cat = el.dataset.k; renderProfil(false); },
+  // Remet dans le panier les articles d'une ancienne commande
+  'profil-recommander': (el) => {
+    if (!canOrder()) return;
+    const o = SHOP.commandes.find((x) => x.id === el.dataset.id);
+    let n = 0;
+    (o?.lignes || []).forEach((l) => {
+      if (!prodS(l.produit_id)) return;
+      SHOP.cart[l.produit_id] = Math.min(99, (SHOP.cart[l.produit_id] || 0) + Number(l.quantite)); n++;
+    });
+    saveCart(); updateCartUI();
+    if (!n) return toast('Ces articles ne sont plus disponibles.', 'warn');
+    toast('Articles ajoutés au panier');
+    openCart();
+  },
+});

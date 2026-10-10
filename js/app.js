@@ -34,7 +34,7 @@ async function route() {
   } else {
     setManifest(false);
     // Un lien de connexion client relance la boutique même si elle est déjà ouverte
-    if (CURRENT === 'shop' && !/[?&]c=/.test(h)) return;
+    if (CURRENT === 'shop' && !/[?&]c=/.test(h)) { renderShopView(); return; }
     stopAdmin();
     stopShop();
     CURRENT = 'shop';

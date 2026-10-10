@@ -907,3 +907,87 @@ button.status-card { border: 0; color: #fff; cursor: pointer; text-align: left; 
   .hist-stats { grid-template-columns: 1fr 1fr; }
   .tl-d { font-size: 11px; }
 }
+
+/* =====================================================================
+   Page « Mon profil » (client)
+   ===================================================================== */
+.profil { max-width: 1100px; margin: 0 auto; padding: 18px clamp(12px, 3vw, 32px) 60px; }
+.profil.enter > * { animation: fadeUp .6s var(--ease) both; }
+.profil.enter > *:nth-child(2) { animation-delay: .06s; }
+.profil.enter > *:nth-child(3) { animation-delay: .12s; }
+.profil.enter > *:nth-child(4) { animation-delay: .18s; }
+.profil-hero {
+  position: relative; overflow: hidden; isolation: isolate; display: flex; align-items: center; gap: 20px; flex-wrap: wrap;
+  padding: clamp(22px, 4vw, 36px); border-radius: 30px; color: #fff;
+  background: linear-gradient(135deg, #2a0f22 0%, #5b1641 55%, #8a2a5a 100%);
+}
+.profil-hero .blob { position: absolute; border-radius: 50%; filter: blur(50px); opacity: .6; z-index: -1; animation: blob 14s ease-in-out infinite; }
+.profil-hero .b1 { width: 260px; height: 260px; background: #f6a609; right: -60px; top: -90px; }
+.profil-hero .b2 { width: 220px; height: 220px; background: #e0435a; left: 20%; bottom: -130px; animation-delay: -6s; }
+.profil-avatar {
+  width: 86px; height: 86px; border-radius: 28px; display: grid; place-items: center; flex: none;
+  font-family: var(--serif); font-size: 34px; font-weight: 700; font-style: italic;
+  background: linear-gradient(135deg, #ffd27a, #ff9a6b); color: #4a1530; box-shadow: 0 16px 34px -14px rgba(0,0,0,.6);
+  animation: logoIn .9s var(--spring);
+}
+.profil-id { flex: 1; min-width: 220px; }
+.profil-id h1 { font-family: var(--serif); font-size: clamp(26px, 4vw, 38px); font-weight: 600; }
+.profil-id p { margin-top: 6px; color: rgba(255,255,255,.82); font-size: 14.5px; display: flex; align-items: center; gap: 4px 14px; flex-wrap: wrap; }
+.profil-id p span { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+.profil-tags { margin-top: 10px; display: flex; gap: 8px; flex-wrap: wrap; }
+.profil-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.btn.ghost-light { background: rgba(255,255,255,.12); color: #fff; box-shadow: inset 0 0 0 1.5px rgba(255,255,255,.25); }
+.btn.ghost-light:hover { background: rgba(255,255,255,.2); }
+
+.profil-stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin: 16px 0 22px; }
+.pstat { background: #fff; border-radius: var(--r); box-shadow: var(--sh); padding: 16px; display: flex; flex-direction: column; gap: 2px; position: relative; overflow: hidden; }
+.pstat .pi { width: 36px; height: 36px; border-radius: 12px; display: grid; place-items: center; background: var(--plum-soft); color: var(--plum2); margin-bottom: 8px; }
+.pstat small { color: var(--muted); font-weight: 600; font-size: 12.5px; }
+.pstat b { font-size: clamp(18px, 2.2vw, 24px); font-weight: 800; letter-spacing: -.03em; white-space: nowrap; }
+.pstat.due .pi { background: var(--danger-soft); color: var(--danger); }
+.pstat.due b { color: var(--danger); }
+.pstat .btn { margin-top: 8px; align-self: flex-start; }
+
+.profil-section { background: #fff; border-radius: 26px; box-shadow: var(--sh); padding: clamp(16px, 3vw, 24px); margin-bottom: 18px; }
+.ps-head { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; flex-wrap: wrap; margin-bottom: 14px; }
+.ps-head h2 { font-family: var(--serif); font-size: 22px; font-weight: 600; }
+
+.cat-bars { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 10px; }
+.cat-bar {
+  display: flex; align-items: center; gap: 12px; padding: 12px 14px; border-radius: 18px; border: 0; cursor: pointer; text-align: left; font: inherit;
+  background: #fcf8fa; box-shadow: inset 0 0 0 1.5px transparent; transition: .3s var(--ease);
+}
+.cat-bar:hover { transform: translateY(-2px); }
+.cat-bar.on { background: #fff; box-shadow: inset 0 0 0 2px var(--c), 0 14px 26px -18px var(--c); }
+.cb-ic { width: 44px; height: 44px; border-radius: 14px; display: grid; place-items: center; background: var(--c); color: #fff; flex: none; }
+.cb-txt { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.cb-txt small { color: var(--muted); font-size: 12.5px; }
+.cb-txt .bar { margin-top: 4px; }
+.cb-m { font-weight: 800; letter-spacing: -.02em; white-space: nowrap; }
+
+.prod-favs { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 10px; margin-top: 12px; }
+.fav { display: flex; align-items: center; gap: 12px; padding: 10px; border-radius: 16px; box-shadow: inset 0 0 0 1.5px var(--line); animation: fadeUp .4s var(--ease) both; }
+.fav-txt { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.fav-txt b { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.fav-txt small { color: var(--muted); }
+
+.profil-orders { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 12px; }
+.my-order.po { margin: 0; display: flex; flex-direction: column; gap: 6px; border-left: 4px solid var(--mango); }
+.my-order.po.st-payee { border-left-color: var(--leaf); }
+.my-order.po.st-credit { border-left-color: var(--danger); }
+.my-order.po.st-reservee { border-left-color: var(--plum2); }
+.my-order.po.st-annulee { border-left-color: #cbbcc5; opacity: .75; }
+.po-lines { display: flex; gap: 6px; flex-wrap: wrap; margin: 4px 0; }
+.po-lines span { display: inline-flex; align-items: center; gap: 5px; padding: 4px 9px; border-radius: 9px; font-size: 13px; background: color-mix(in srgb, var(--c) 10%, #fff); color: var(--ink2); }
+.po-lines span .ic { color: var(--c); }
+.po-lines span.dim { opacity: .4; }
+.po-act { display: flex; gap: 8px; justify-content: flex-end; margin-top: 4px; }
+
+@media (max-width: 720px) {
+  .profil-stats { grid-template-columns: 1fr 1fr; gap: 10px; }
+  .profil-hero { gap: 14px; border-radius: 24px; }
+  .profil-avatar { width: 68px; height: 68px; border-radius: 22px; font-size: 28px; }
+  .profil-actions { width: 100%; }
+  .profil-actions .btn { flex: 1; }
+  .cat-bars, .prod-favs, .profil-orders { grid-template-columns: 1fr; }
+}
