@@ -929,7 +929,7 @@ function clientCard(c, i) {
   let acts = '';
   if (c.statut === 'en_attente') acts = `<button class="btn leaf sm" data-act="cli-valider" data-id="${id}">${ic('user-check')} Valider</button><button class="btn ghost sm" data-act="cli-refuser" data-id="${id}">${ic('user-x')} Refuser</button>`;
   else if (c.statut === 'valide') {
-    acts = `<button class="btn soft sm" data-act="cli-detail" data-id="${id}">${ic('eye')} Détails</button>
+    acts = `<button class="btn soft sm" data-act="cli-detail" data-id="${id}">${ic('history')} Historique</button>
       ${st.du ? `<button class="btn leaf sm" data-act="cli-rembourser" data-id="${id}">${ic('banknote')} Remboursement</button>` : ''}
       ${c.telephone ? `<button class="btn ghost sm" data-act="cli-lien" data-id="${id}" title="Envoyer son lien de connexion">${ic('link')} Lien</button>` : ''}
       <button class="btn ghost sm" data-act="cli-refuser" data-id="${id}" title="Bloquer">${ic('ban')}</button>`;
@@ -1004,19 +1004,101 @@ Object.assign(ACT, {
       },
     });
   },
-  'cli-detail': (el) => {
-    const c = client(el.dataset.id);
-    const cmds = A.commandes.filter((x) => x.client_id === c.id).sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)));
-    const st = clientStats(c.id);
-    modal({
-      title: `${esc(c.nom)}`, size: 'wide',
-      body: `<div class="cstats" style="margin-bottom:16px"><div><small>Commandes</small><b>${st.n}</b></div><div><small>Total acheté</small><b>${money(st.total)}</b></div><div><small>Reste dû</small><b style="color:${st.du ? 'var(--danger)' : 'inherit'}">${money(st.du)}</b></div></div>
-        <div class="field"><label>Note interne</label><textarea id="cd-note" placeholder="Ex. voisine, paie toujours le vendredi…">${esc(c.note || '')}</textarea></div>
-        ${cmds.length ? `<div class="table-wrap"><table class="tbl"><thead><tr><th>N°</th><th>Date</th><th>Articles</th><th>Statut</th><th class="num">Total</th></tr></thead><tbody>
-        ${cmds.map((o, i) => `<tr style="--i:${i}"><td><b>${esc(o.numero)}</b></td><td>${fDate(o.created_at)}</td><td class="small">${(o.lignes || []).map((l) => `${l.quantite}× ${esc(l.nom)}`).join(', ')}</td><td>${pillCmd(o.statut)}</td><td class="num">${money(o.total)}</td></tr>`).join('')}
-        </tbody></table></div>` : '<p class="muted">Aucune commande.</p>'}`,
-      foot: `<button class="btn ghost" data-close>Fermer</button><button class="btn primary" id="cd-ok">Enregistrer la note</button>`,
-      onMount: (m, close) => { $('#cd-ok', m).onclick = (e) => run(e.currentTarget, async () => { await DB.update('clients', c.id, { note: $('#cd-note', m).value }); close(); toast('Note enregistrée'); await refreshAfter(); }); },
-    });
-  },
+  'cli-detail': (el) => historiqueClient(el.dataset.id),
 });
+
+/* ---------- Historique des commandes d'un client ---------- */
+const HIST_FILTRES = [
+  ['toutes', 'Toutes', () => true],
+  ['cours', 'En cours', (c) => c.statut === 'en_attente' || c.statut === 'reservee'],
+  ['payee', 'Payées', (c) => c.statut === 'payee'],
+  ['credit', 'À crédit', (c) => c.statut === 'credit'],
+  ['annulee', 'Annulées', (c) => c.statut === 'annulee'],
+];
+
+// Étapes d'une commande reconstituées à partir des dates enregistrées
+function etapesCommande(c) {
+  const e = [{ d: c.created_at, icon: 'shopping-bag', txt: c.note === 'Vente saisie par la gérante' ? 'Vente enregistrée en boutique' : `Commandée${c.date_reservation ? ` pour le ${fDate(c.date_reservation)}${c.heure_reservation ? ' (' + esc(c.heure_reservation) + ')' : ''}` : ''}` }];
+  (c.paiements || []).forEach((p) => e.push({ d: p.date, icon: (p.compte || p.moyen) === 'wave' ? 'waves' : 'banknote', txt: `Paiement ${compteLbl(p.compte || p.moyen).toLowerCase()} : <b>${money(p.montant)}</b>`, cls: 'in' }));
+  if (c.livree_at || c.confirmed_at) e.push({ d: c.livree_at || c.confirmed_at, icon: 'package-check', txt: 'Remise au client' });
+  if (Number(c.rendu) > 0) e.push({ d: null, icon: 'undo-2', txt: `Argent rendu : <b>${money(c.rendu)}</b>`, cls: 'out' });
+  if (c.statut === 'annulee') e.push({ d: null, icon: 'circle-x', txt: 'Annulée', cls: 'out' });
+  return e.sort((a, b) => (a.d ? 0 : 1) - (b.d ? 0 : 1) || String(a.d).localeCompare(String(b.d)));
+}
+
+function historiqueClient(id, filtre = 'toutes') {
+  const c = client(id);
+  if (!c) return;
+  const toutes = A.commandes.filter((x) => x.client_id === c.id).sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)));
+  const st = clientStats(c.id);
+  const liv = toutes.filter(isLivree);
+  const paye = sum(toutes.filter((x) => x.statut !== 'annulee'), PAYE);
+  const derniere = toutes[0];
+  // Produits préférés (quantités sur les commandes remises)
+  const prefs = {};
+  liv.forEach((o) => (o.lignes || []).forEach((l) => { prefs[l.nom] = (prefs[l.nom] || 0) + Number(l.quantite); }));
+  const top = Object.entries(prefs).sort((a, b) => b[1] - a[1]).slice(0, 4);
+
+  const corps = () => {
+    const f = HIST_FILTRES.find((x) => x[0] === filtre) || HIST_FILTRES[0];
+    const list = toutes.filter(f[2]);
+    return list.length ? list.map((o, i) => `<div class="hist-cmd st-${o.statut}" style="--i:${i}">
+        <div class="hist-top">
+          <div><b>${esc(o.numero)}</b> ${pillCmd(o.statut)}</div>
+          <b class="hist-total">${money(o.total)}</b>
+        </div>
+        <div class="hist-lines">${(o.lignes || []).map((l) => `<span>${l.quantite} × ${esc(l.nom)}</span>`).join('')}</div>
+        <ol class="timeline">${etapesCommande(o).map((e) => `<li class="${e.cls || ''}"><span class="tl-ic">${ic(e.icon)}</span><span class="tl-txt">${e.txt}</span>${e.d ? `<span class="tl-d">${fDateTime(e.d)}</span>` : ''}</li>`).join('')}</ol>
+        ${reste(o) > 0 ? `<div class="owe-line" style="background:var(--danger-soft);color:var(--danger)">${ic('hand-coins', 'sm')} Reste à payer : <b>${money(reste(o))}</b></div>` : ''}
+        ${nousDevons(o) > 0 ? `<div class="owe-line">${ic('undo-2', 'sm')} Vous lui devez : <b>${money(nousDevons(o))}</b></div>` : ''}
+        <div class="hist-act"><button class="btn ghost sm" data-hist-voir="${esc(o.numero)}">${ic('external-link')} Ouvrir la commande</button></div>
+      </div>`).join('')
+      : `<div class="empty" style="padding:24px 0"><span class="big">${ic('receipt')}</span><p>Aucune commande dans cette catégorie.</p></div>`;
+  };
+
+  modal({
+    title: `${ic('history')} Historique`, size: 'wide',
+    body: `<div class="hist-head">
+        <span class="avatar">${esc(initials(c.nom))}</span>
+        <div class="nm"><b>${esc(c.nom)}</b><span class="small muted">${esc(c.telephone || 'Pas de téléphone')} · client depuis le ${fDate(c.created_at)}</span></div>
+        ${c.statut === 'valide' ? '<span class="pill ok">Validé</span>' : c.statut === 'en_attente' ? '<span class="pill warn">À valider</span>' : '<span class="pill bad">Refusé</span>'}
+      </div>
+      <div class="hist-stats">
+        <div><small>Commandes remises</small><b>${liv.length}</b></div>
+        <div><small>Total acheté</small><b>${money(st.total)}</b></div>
+        <div><small>Total payé</small><b>${money(paye)}</b></div>
+        <div><small>${st.devons ? 'Vous lui devez' : 'Reste dû'}</small><b style="color:${st.du ? 'var(--danger)' : st.devons ? '#b05a00' : 'inherit'}">${money(st.devons || st.du)}</b></div>
+        <div><small>Panier moyen</small><b>${liv.length ? money(st.total / liv.length) : '—'}</b></div>
+        <div><small>Dernière commande</small><b>${derniere ? (daysSince(derniere.created_at) ? `il y a ${daysSince(derniere.created_at)} j` : "aujourd'hui") : '—'}</b></div>
+      </div>
+      ${top.length ? `<div class="hist-prefs"><span class="small muted">Produits préférés</span>${top.map(([n, q]) => `<span class="pill info">${esc(n)} × ${num(q)}</span>`).join('')}</div>` : ''}
+      <div class="toolbar" style="margin:14px 0 10px">
+        <div class="seg scroll" id="hist-f">${HIST_FILTRES.map(([k, l, fn]) => { const n = toutes.filter(fn).length; return `<button type="button" data-k="${k}" class="${k === filtre ? 'on' : ''}">${l}${n && k !== 'toutes' ? `<span class="count">${n}</span>` : ''}</button>`; }).join('')}</div>
+        <button type="button" class="btn ghost sm" id="hist-csv">${ic('download')} CSV</button>
+      </div>
+      <div id="hist-list">${corps()}</div>
+      <div class="field" style="margin-top:16px"><label>Note interne</label><textarea id="cd-note" placeholder="Ex. voisine, paie toujours le vendredi…">${esc(c.note || '')}</textarea></div>`,
+    foot: `${c.telephone ? `<a class="btn ghost" href="${esc(waLink(c.telephone, `Bonjour ${c.nom}`))}" target="_blank" rel="noopener">${ic('message-circle')} WhatsApp</a>` : ''}
+      ${st.du ? `<button class="btn leaf" id="cd-remb">${ic('banknote')} Remboursement</button>` : ''}
+      <button class="btn primary" id="cd-ok">Enregistrer la note</button>`,
+    onMount: (m, close) => {
+      $('#hist-f', m).onclick = (e) => {
+        const b = e.target.closest('[data-k]'); if (!b) return;
+        filtre = b.dataset.k;
+        $$('#hist-f button', m).forEach((x) => x.classList.toggle('on', x === b));
+        $('#hist-list', m).innerHTML = corps(); icons();
+      };
+      m.addEventListener('click', (e) => {
+        const v = e.target.closest('[data-hist-voir]');
+        if (v) { close(); ACT.goto({ dataset: { page: 'commandes', f: 'toutes', q: v.dataset.histVoir } }); }
+      });
+      $('#hist-csv', m).onclick = () => downloadCSV(`historique-${norm(c.nom).replace(/\s+/g, '-')}-${dayKey()}.csv`, [
+        ['N°', 'Date', 'Statut', 'Articles', 'Total', 'Payé', 'Reste dû', 'Réservé pour', 'Paiements'],
+        ...toutes.map((o) => [o.numero, fDateTime(o.created_at), (STATUT_CMD[o.statut] || [o.statut])[0], (o.lignes || []).map((l) => `${l.quantite} x ${l.nom}`).join(', '),
+          o.total, PAYE(o), reste(o), o.date_reservation || '', paiementsTxt(o)]),
+      ]);
+      const rb = $('#cd-remb', m); if (rb) rb.onclick = () => { close(); remboursementModal(c); };
+      $('#cd-ok', m).onclick = (e) => run(e.currentTarget, async () => { await DB.update('clients', c.id, { note: $('#cd-note', m).value }); close(); toast('Note enregistrée'); await refreshAfter(); });
+    },
+  });
+}
