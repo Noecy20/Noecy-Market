@@ -25,7 +25,7 @@ Code PIN de l'espace gérante en mode local : **2012** (à changer dans Paramèt
 
 1. Créez un projet sur https://supabase.com (région *Europe*).
 2. **SQL Editor** → **New query** → collez `supabase/schema.sql` → **Run**.
-3. Nouvelle requête → collez `supabase/migration_v2.sql` → **Run** (caisse par compte, matières, réservations, connexion par numéro, notifications).
+3. Nouvelle requête → collez `supabase/migration_v2.sql` → **Run**, puis `supabase/migration_v3_vendeurs.sql` → **Run** (caisse par compte, matières, réservations, connexion par numéro, notifications).
 4. **Authentication → Users → Add user** : créez votre compte gérante (cochez *Auto Confirm User*), puis :
    ```sql
    insert into admins (email) values ('votre.email@exemple.com');
@@ -93,6 +93,13 @@ Ajoutez `{montant}` pour pré-remplir le montant, par exemple `https://pay.wave.
 
 ### Caisse
 Solde par compte (**Espèces**, **Wave**, total). **Dépense** = argent pris dans la caisse (motif + montant + compte), **Entrée** = apport, **Transfert** = retrait Wave ↔ espèces. Pour démarrer, enregistrez votre fond de caisse en **Entrée → Apport**.
+
+### Points de vente (vendeurs)
+- Exécutez d'abord `supabase/migration_v3_vendeurs.sql` (après la v2).
+- **Points de vente → Nouveau vendeur** : nom, téléphone, code PIN et droits (vendre à crédit, encaisser les crédits, annuler une vente, changer le prix, voir les quantités en stock). L'accès est envoyé par WhatsApp.
+- Le vendeur utilise **`vendeur.html`** (icône verte « Noecy Vendeur » à mettre sur son écran d'accueil) : il vend, suit ses ventes, ses crédits et sa caisse.
+- Chaque vente baisse le **stock Noecy**, mais l'argent, les ventes et les crédits sont **au vendeur** : ils n'entrent ni dans votre caisse ni dans vos commandes. Le coût de la marchandise sortie est déduit de votre bénéfice.
+- Désactiver un vendeur coupe son accès immédiatement ; changer son code le déconnecte de ses autres appareils.
 
 ### Stock, achats et bénéfice
 - **Matières premières** (sucre, fleurs, bananes, huile, bouteilles…) : achetées une fois, utilisées sur plusieurs fabrications. Leur coût est réparti au prorata de la quantité utilisée.

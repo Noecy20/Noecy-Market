@@ -992,3 +992,68 @@ button.status-card { border: 0; color: #fff; cursor: pointer; text-align: left; 
   .profil-actions .btn { flex: 1; }
   .cat-bars, .prod-favs, .profil-orders { grid-template-columns: 1fr; }
 }
+
+/* =====================================================================
+   Points de vente : espace vendeur + page gérante
+   ===================================================================== */
+.vd-logo { background: linear-gradient(135deg, #1c9a69, #0f5a43); box-shadow: 0 8px 18px -8px rgba(15,90,67,.8); }
+.vendeur-app .brand-name b { color: var(--leaf); }
+.vd { min-height: 100vh; padding-bottom: 120px; }
+.vd-top {
+  position: sticky; top: 0; z-index: 50; display: flex; align-items: center; gap: 14px; padding: 12px clamp(14px, 3vw, 32px);
+  background: rgba(251,247,243,.85); backdrop-filter: blur(14px); border-bottom: 1px solid var(--line);
+}
+.vd-top .brand { flex: none; }
+.vd-tabs { display: flex; gap: 4px; margin: 0 auto; background: #fff; padding: 4px; border-radius: 16px; box-shadow: var(--sh); }
+.vd-tabs button { border: 0; background: transparent; cursor: pointer; display: inline-flex; align-items: center; gap: 8px; padding: 9px 16px; border-radius: 12px; font-weight: 600; color: var(--muted); transition: .25s var(--ease); }
+.vd-tabs button.on { background: var(--leaf); color: #fff; box-shadow: 0 8px 18px -10px var(--leaf); }
+.vd-user { display: flex; align-items: center; gap: 8px; flex: none; margin-left: auto; }
+.vd-page { max-width: 1200px; margin: 0 auto; padding: 18px clamp(12px, 3vw, 32px); }
+.vd-page.enter > * { animation: fadeUp .5s var(--ease) both; }
+.vd-tools { display: flex; flex-direction: column; gap: 10px; margin-bottom: 14px; }
+.vd-tools .search { max-width: 460px; }
+.vd-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 12px; }
+.vd-tile {
+  border: 0; padding: 0; text-align: left; font: inherit; color: inherit; cursor: pointer; background: #fff; border-radius: 18px; overflow: hidden;
+  box-shadow: var(--sh); display: flex; flex-direction: column; transition: transform .3s var(--spring), box-shadow .3s; animation: cardIn .45s calc(var(--i,0) * 30ms) var(--ease) both;
+}
+.vd-tile:hover { transform: translateY(-3px); }
+.vd-tile:active { transform: scale(.97); }
+.vd-tile.in { box-shadow: 0 0 0 2.5px var(--leaf), var(--sh); }
+.vd-tile.out { opacity: .5; cursor: not-allowed; }
+.vd-tile.out .pv { filter: grayscale(.9); }
+.vd-media { position: relative; aspect-ratio: 1 / .78; overflow: hidden; }
+.vd-media .pv-ph .ic { width: 34%; height: 34%; }
+.vd-q { position: absolute; top: 8px; right: 8px; min-width: 30px; height: 30px; border-radius: 99px; background: var(--leaf); color: #fff; font-weight: 800; display: grid; place-items: center; padding: 0 8px; box-shadow: 0 6px 14px -6px rgba(0,0,0,.5); animation: popIn .3s var(--spring); }
+.vd-info { padding: 10px 12px 12px; display: flex; flex-direction: column; gap: 4px; align-items: flex-start; }
+.vd-info b { font-size: 14.5px; line-height: 1.2; }
+.vd-info .price { font-size: 15.5px; }
+.ticket-bar {
+  position: fixed; z-index: 60; left: 50%; bottom: 18px; transform: translate(-50%, 160%); width: min(92vw, 460px);
+  display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 10px 10px 20px; border: 0; cursor: pointer;
+  border-radius: 20px; background: var(--ink); color: #fff; font-weight: 600; font-size: 15px; box-shadow: var(--sh-lg); transition: transform .5s var(--spring);
+}
+.ticket-bar.show { transform: translate(-50%, 0); }
+.ticket-bar.bump { animation: bump .4s var(--spring); }
+.ticket-bar .go { background: var(--leaf); padding: 10px 16px; border-radius: 14px; display: inline-flex; align-items: center; gap: 6px; }
+.prix-edit { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--muted); }
+.prix-edit input { width: 86px; padding: 5px 8px; border-radius: 9px; border: 1.5px solid var(--line); font-weight: 600; }
+.vd-head { display: flex; justify-content: space-between; align-items: flex-end; gap: 12px; flex-wrap: wrap; margin-bottom: 16px; }
+.vd-head h1 { font-family: var(--serif); font-size: clamp(24px, 3vw, 32px); font-weight: 600; }
+.vendeur-card.off { opacity: .6; }
+.vendeur-card .ch .switch { flex: none; }
+.droits-chips { display: flex; gap: 6px; flex-wrap: wrap; }
+.droits-list { display: grid; gap: 8px; margin-bottom: 12px; }
+.droits-list .toggle-line { margin-bottom: 0; }
+.btn.danger-txt { color: var(--danger); margin-right: auto; }
+@media (max-width: 720px) {
+  .vd { padding-bottom: 150px; }
+  /* le flou du bandeau empêcherait la barre d'onglets de se fixer en bas de l'écran */
+  .vd-top { padding: 10px 12px; gap: 8px; backdrop-filter: none; -webkit-backdrop-filter: none; background: rgba(251,247,243,.97); }
+  .vd-top .brand-name { font-size: 17px; }
+  .vd-tabs { position: fixed; left: 10px; right: 10px; bottom: 10px; z-index: 70; justify-content: space-around; padding: 6px; border-radius: 20px; box-shadow: var(--sh-lg); }
+  .vd-tabs button { flex: 1; flex-direction: column; gap: 2px; padding: 7px 4px; font-size: 11.5px; }
+  .ticket-bar { bottom: 86px; }
+  .vd-grid { grid-template-columns: repeat(2, 1fr); gap: 10px; }
+  .vd-kpis { grid-template-columns: 1fr 1fr; }
+}

@@ -1,0 +1,30 @@
+{
+  "id": "./vendeur.html",
+  "name": "Noecy Vendeur",
+  "short_name": "Vendeur",
+  "description": "Espace vendeur Noecy Market",
+  "lang": "fr",
+  "start_url": "./vendeur.html",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#fbf7f3",
+  "theme_color": "#0f5a43",
+  "icons": [
+    {
+      "src": "icons/vendeur-192.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "icons/vendeur-512.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    },
+    {
+      "src": "icons/vendeur-maskable-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ]
+}

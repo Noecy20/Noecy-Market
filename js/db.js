@@ -8,7 +8,7 @@
   'use strict';
 
   const cfg = window.NOECY_CONFIG || {};
-  const TABLES = ['categories', 'produits', 'clients', 'commandes', 'fabrications', 'ecritures', 'matieres', 'achats'];
+  const TABLES = ['categories', 'produits', 'clients', 'commandes', 'fabrications', 'ecritures', 'matieres', 'achats', 'vendeurs'];
 
   const uid = () =>
     (window.crypto && crypto.randomUUID)
@@ -174,6 +174,133 @@
       return clone(db.commandes.filter((c) => c.client_id === id)).sort((a, b) => b.created_at.localeCompare(a.created_at));
     },
 
+    // --- Points de vente (vendeurs) ---
+    _vendeur(id, token) {
+      const v = this.db().vendeurs.find((x) => x.id === id && x.token === token);
+      if (!v) throw new Error('Session expirée : reconnectez-vous.');
+      if (!v.actif) throw new Error('Votre accès vendeur a été désactivé par Noecy Market.');
+      return v;
+    },
+    _coutMoyen(pid) {
+      const f = this.db().fabrications.filter((x) => x.produit_id === pid);
+      const q = f.reduce((s, x) => s + Number(x.quantite), 0);
+      return q ? f.reduce((s, x) => s + Number(x.cout_total), 0) / q : 0;
+    },
+    async vendeurLogin(telephone, code) {
+      const t = tel9(telephone);
+      if (t.length < 8) throw new Error('Numéro de téléphone invalide.');
+      const v = this.db().vendeurs.filter((x) => tel9(x.telephone) === t).sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)))[0];
+      if (!v) throw new Error('Aucun vendeur avec ce numéro.');
+      if (!v.actif) throw new Error('Votre accès a été désactivé par Noecy Market.');
+      if (v.bloque_jusqua && new Date(v.bloque_jusqua) > new Date()) throw new Error('Trop d\'essais. Réessayez dans quelques minutes.');
+      if (!v.code_hash) throw new Error('Aucun code défini : demandez votre code à Noecy Market.');
+      if ((await sha256(code)) !== v.code_hash) {
+        v.essais = (v.essais || 0) + 1;
+        if (v.essais >= 5) { v.bloque_jusqua = new Date(Date.now() + 15 * 60000).toISOString(); v.essais = 0; }
+        this._save();
+        throw new Error('Code incorrect.');
+      }
+      v.essais = 0; v.bloque_jusqua = null; this._save();
+      return { id: v.id, token: v.token, nom: v.nom };
+    },
+    async vendeurData(id, token) {
+      const db = this.db(), v = this._vendeur(id, token);
+      const voir = !!(v.droits || {}).voir_stock;
+      const p = { ...DEFAULT_SETTINGS, ...db.parametres };
+      return clone({
+        vendeur: { id: v.id, nom: v.nom, telephone: v.telephone, droits: v.droits || {} },
+        parametres: { nom_boutique: p.nom_boutique, devise: p.devise, wave_lien: p.wave_lien },
+        categories: db.categories,
+        produits: db.produits.filter((x) => x.actif).map((x) => ({
+          id: x.id, nom: x.nom, prix: x.prix, photo: x.photo, unite: x.unite, categorie_id: x.categorie_id, suivi_stock: x.suivi_stock !== false,
+          stock: voir ? x.stock : null, dispo: x.suivi_stock !== false ? Math.max(0, x.stock) : null,
+        })),
+        ventes: db.commandes.filter((c) => c.vendeur_id === v.id).sort((a, b) => String(b.created_at).localeCompare(String(a.created_at))),
+        ecritures: db.ecritures.filter((e) => e.vendeur_id === v.id).sort((a, b) => String(b.date).localeCompare(String(a.date)) || String(b.created_at).localeCompare(String(a.created_at))),
+      });
+    },
+    async vendeurVente(id, token, { lignes, client_nom, client_tel, paiements, note }) {
+      const db = this.db(), v = this._vendeur(id, token), dr = v.droits || {};
+      const out = []; let total = 0, cout = 0;
+      for (const l of lignes) {
+        const q = parseInt(l.quantite, 10);
+        if (!q || q <= 0) continue;
+        const p = db.produits.find((x) => x.id === l.produit_id && x.actif);
+        if (!p) throw new Error('Un produit n\'est plus disponible.');
+        const suit = p.suivi_stock !== false;
+        if (suit && p.stock < q) throw new Error(`Stock insuffisant pour ${p.nom} (${p.stock} disponible(s)).`);
+        const px = dr.prix && l.prix !== undefined && l.prix !== null && l.prix !== '' ? Math.max(0, Number(l.prix)) : p.prix;
+        out.push({ produit_id: p.id, nom: p.nom, prix: px, quantite: q, _p: p, _suit: suit });
+        total += px * q;
+      }
+      if (!out.length) throw new Error('Ajoutez au moins un article.');
+      let paye = 0; const pays = [];
+      for (const pay of paiements || []) {
+        let m = Math.round(Number(pay.montant) || 0);
+        m = Math.min(m, total - paye);
+        if (m <= 0) continue;
+        paye += m; pays.push({ date: now(), compte: pay.compte === 'wave' ? 'wave' : 'especes', montant: m });
+      }
+      if (paye < total) {
+        if (!dr.credit) throw new Error('Vous n\'avez pas le droit de vendre à crédit : encaissez le montant complet.');
+        if ((client_nom || '').trim().length < 2) throw new Error('Pour une vente à crédit, indiquez le nom du client.');
+      }
+      out.forEach((l) => { if (l._suit) { l._p.stock -= l.quantite; cout += l.quantite * this._coutMoyen(l.produit_id); } delete l._p; delete l._suit; });
+      db.compteur = (db.compteur || 0) + 1;
+      const t = now();
+      const cmd = {
+        id: uid(), numero: numero(db.compteur), client_id: null, client_nom: (client_nom || '').trim() || 'Client de passage',
+        client_telephone: (client_tel || '').trim() || null, vendeur_id: v.id, lignes: out, total,
+        moyen_paiement: !paye ? 'credit' : pays.length > 1 ? 'mixte' : pays[0].compte,
+        statut: paye >= total ? 'payee' : 'credit', montant_paye: paye, rendu: 0, cout_revient: cout, paiements: pays,
+        note: (note || '').slice(0, 300), created_at: t, confirmed_at: t, livree_at: t, paid_at: paye >= total ? t : null,
+      };
+      db.commandes.push(cmd);
+      pays.forEach((p) => db.ecritures.push({ id: uid(), created_at: t, date: today(), libelle: `Vente ${cmd.numero} – ${cmd.client_nom}`, type: 'entree', categorie: 'vente', compte: p.compte, montant: p.montant, ref: cmd.id, vendeur_id: v.id }));
+      this._save();
+      return clone(cmd);
+    },
+    async vendeurEncaisser(id, token, commandeId, paiements) {
+      const db = this.db(), v = this._vendeur(id, token);
+      if (!(v.droits || {}).encaisser) throw new Error('Vous n\'avez pas le droit d\'encaisser les crédits.');
+      const c = db.commandes.find((x) => x.id === commandeId && x.vendeur_id === v.id);
+      if (!c) throw new Error('Vente introuvable.');
+      if (c.statut !== 'credit') throw new Error('Cette vente n\'est pas à crédit.');
+      let reste = c.total - ((c.montant_paye || 0) - (c.rendu || 0)), ajout = 0; const t = now();
+      for (const pay of paiements || []) {
+        const m = Math.min(Math.round(Number(pay.montant) || 0), reste - ajout);
+        if (m <= 0) continue;
+        ajout += m;
+        const compte = pay.compte === 'wave' ? 'wave' : 'especes';
+        c.paiements = [...(c.paiements || []), { date: t, compte, montant: m }];
+        db.ecritures.push({ id: uid(), created_at: t, date: today(), libelle: `Remboursement crédit ${c.numero} – ${c.client_nom}`, type: 'entree', categorie: 'recouvrement', compte, montant: m, ref: c.id, vendeur_id: v.id });
+      }
+      if (ajout <= 0) throw new Error('Saisissez un montant.');
+      c.montant_paye = (c.montant_paye || 0) + ajout;
+      if (c.montant_paye - (c.rendu || 0) >= c.total) { c.statut = 'payee'; c.paid_at = t; }
+      this._save(); return clone(c);
+    },
+    async vendeurAnnuler(id, token, commandeId) {
+      const db = this.db(), v = this._vendeur(id, token);
+      if (!(v.droits || {}).annuler) throw new Error('Vous n\'avez pas le droit d\'annuler une vente.');
+      const c = db.commandes.find((x) => x.id === commandeId && x.vendeur_id === v.id);
+      if (!c) throw new Error('Vente introuvable.');
+      if (c.statut === 'annulee') throw new Error('Vente déjà annulée.');
+      c.lignes.forEach((l) => { const p = db.produits.find((x) => x.id === l.produit_id); if (p && p.suivi_stock !== false) p.stock += Number(l.quantite); });
+      const t = now();
+      if ((c.montant_paye || 0) - (c.rendu || 0) > 0) {
+        (c.paiements || []).forEach((p) => db.ecritures.push({ id: uid(), created_at: t, date: today(), libelle: `Annulation ${c.numero} – ${c.client_nom}`, type: 'sortie', categorie: 'annulation', compte: p.compte || 'especes', montant: p.montant, ref: c.id, vendeur_id: v.id }));
+      }
+      c.statut = 'annulee'; c.rendu = c.montant_paye || 0;
+      this._save(); return clone(c);
+    },
+    async adminVendeurCode(vendeurId, code) {
+      if (!/^\d{4,6}$/.test(String(code || ''))) throw new Error('Le code doit contenir 4 à 6 chiffres.');
+      const v = this.db().vendeurs.find((x) => x.id === vendeurId);
+      if (!v) throw new Error('Vendeur introuvable.');
+      v.code_hash = await sha256(code); v.token = uid(); v.essais = 0; v.bloque_jusqua = null; this._save();
+    },
+
     // --- Notifications push : indisponibles sans serveur ---
     pushDisponible() { return false; },
     async savePushClient() { throw new Error('Notifications disponibles uniquement en mode en ligne.'); },
@@ -279,6 +406,26 @@
     },
     async myOrders(id, token) {
       return chk(await this.sb.rpc('mes_commandes', { p_id: id, p_token: token })) || [];
+    },
+
+    // --- Points de vente (vendeurs) ---
+    async vendeurLogin(telephone, code) {
+      return chkRpc(await this.sb.rpc('vendeur_connexion', { p_telephone: telephone || '', p_code: code || '' }));
+    },
+    async vendeurData(id, token) { return chk(await this.sb.rpc('vendeur_donnees', { p_id: id, p_token: token })); },
+    async vendeurVente(id, token, { lignes, client_nom, client_tel, paiements, note }) {
+      return chk(await this.sb.rpc('vendeur_vente', {
+        p_id: id, p_token: token, p_lignes: lignes, p_client_nom: client_nom || '', p_client_tel: client_tel || '', p_paiements: paiements || [], p_note: note || '',
+      }));
+    },
+    async vendeurEncaisser(id, token, commandeId, paiements) {
+      return chk(await this.sb.rpc('vendeur_encaisser', { p_id: id, p_token: token, p_commande: commandeId, p_paiements: paiements }));
+    },
+    async vendeurAnnuler(id, token, commandeId) {
+      return chk(await this.sb.rpc('vendeur_annuler', { p_id: id, p_token: token, p_commande: commandeId }));
+    },
+    async adminVendeurCode(vendeurId, code) {
+      chkRpc(await this.sb.rpc('admin_vendeur_code', { p_vendeur: vendeurId, p_code: code }));
     },
 
     // --- Notifications push ---

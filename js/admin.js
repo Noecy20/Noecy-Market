@@ -4,8 +4,9 @@
 'use strict';
 
 const A = {
-  ready: false, page: 'dashboard', periode: '30', poll: null, sig: '', charts: {}, v2: true,
-  produits: [], categories: [], clients: [], commandes: [], fabrications: [], ecritures: [], matieres: [], achats: [],
+  ready: false, page: 'dashboard', periode: '30', poll: null, sig: '', charts: {}, v2: true, v3: true,
+  produits: [], categories: [], clients: [], commandes: [], fabrications: [], ecritures: [], matieres: [], achats: [], vendeurs: [],
+  cmdAll: [], ecrAll: [], // toutes les ventes / écritures, y compris celles des points de vente
   f: { cmd: 'en_attente', cli: 'en_attente', q: '', gl: '30', glType: 'tous', glCompte: 'tous', cat: 'tous', inv: 'produits' },
   seen: null,
 };
@@ -47,6 +48,7 @@ async function loadAll() {
     ...DB.TABLES.map((t) => DB.all(t).catch((e) => {
       // Tables ajoutées par la migration v2 : l'app reste utilisable sans elles
       if (t === 'matieres' || t === 'achats') { A.v2 = false; return []; }
+      if (t === 'vendeurs') { A.v3 = false; return []; }
       throw e;
     })),
   ]);
@@ -54,10 +56,15 @@ async function loadAll() {
   DB.TABLES.forEach((t, i) => { A[t] = rows[i] || []; });
   A.categories.sort((a, b) => (a.ordre || 0) - (b.ordre || 0));
   A.ecritures.forEach((e) => { if (!e.compte) e.compte = 'especes'; });
+  // Les ventes et la caisse des points de vente appartiennent aux vendeurs : on les sépare de celles de Noecy
+  A.cmdAll = A.commandes; A.ecrAll = A.ecritures;
+  A.commandes = A.cmdAll.filter((c) => !c.vendeur_id);
+  A.ecritures = A.ecrAll.filter((e) => !e.vendeur_id);
   CATS = A.categories;
 }
 const adminSig = () => [
-  A.commandes.map((c) => c.id + c.statut + c.montant_paye + c.rendu).join(),
+  A.cmdAll.map((c) => c.id + c.statut + c.montant_paye + c.rendu).join(),
+  A.vendeurs.map((v) => v.id + v.actif + JSON.stringify(v.droits)).join(),
   A.clients.map((c) => c.id + c.statut).join(),
   A.produits.map((p) => p.id + p.stock + p.prix + p.actif + p.suivi_stock).join(),
   A.matieres.map((m) => m.id + m.stock).join(),
@@ -70,7 +77,7 @@ async function startAdmin() {
   if (!(await DB.isAdmin())) return renderLogin();
   try { await loadAll(); } catch (e) { toast(e.message, 'err'); return renderLogin(); }
   A.sig = adminSig();
-  A.seen = new Set([...A.commandes.map((c) => c.id), ...A.clients.map((c) => c.id)]);
+  A.seen = new Set([...A.cmdAll.map((c) => c.id), ...A.clients.map((c) => c.id)]);
   A.ready = true;
   renderShell();
   renderPage();
@@ -83,6 +90,11 @@ async function adminPoll() {
   if (!A.ready) return;
   try { await loadAll(); } catch (e) { return; }
   let news = 0;
+  A.cmdAll.filter((c) => !A.seen.has(c.id) && c.vendeur_id).forEach((c) => {
+    A.seen.add(c.id);
+    const v = A.vendeurs.find((x) => x.id === c.vendeur_id);
+    toast(`Vente de ${v ? v.nom : 'un vendeur'} : ${(c.lignes || []).map((l) => `${l.quantite}× ${l.nom}`).join(', ')} · ${money(c.total)}`, 'info', 6000);
+  });
   A.commandes.filter((c) => !A.seen.has(c.id)).forEach((c) => {
     news++; A.seen.add(c.id);
     const txt = `${c.client_nom} · ${money(c.total)}${c.date_reservation ? ' · pour le ' + fDate(c.date_reservation) : ''}`;
@@ -99,7 +111,7 @@ async function adminPoll() {
   if (sig !== A.sig) { A.sig = sig; updateNav(); if (!$('.modal-wrap') && !document.hidden) renderPage(false); }
 }
 
-async function reload() { await loadAll(); A.sig = adminSig(); A.commandes.forEach((c) => A.seen.add(c.id)); A.clients.forEach((c) => A.seen.add(c.id)); }
+async function reload() { await loadAll(); A.sig = adminSig(); A.cmdAll.forEach((c) => A.seen.add(c.id)); A.clients.forEach((c) => A.seen.add(c.id)); }
 async function refreshAfter() { await reload(); updateNav(); renderPage(false); }
 
 /* ---------- Connexion ---------- */
@@ -153,6 +165,7 @@ const NAV = [
   ['inventaire', 'Stock & achats', 'factory'],
   ['rentabilite', 'Rentabilité', 'trending-up'],
   ['relances', 'Crédits & dettes', 'hand-coins'],
+  ['pointsvente', 'Points de vente', 'store'],
   ['parametres', 'Paramètres', 'settings'],
 ];
 
@@ -326,7 +339,7 @@ const soldes = () => {
 
 function soldSince(since) {
   const m = {};
-  A.commandes.filter((c) => isLivree(c) && confirmedAt(c) >= since).forEach((c) => {
+  A.cmdAll.filter((c) => isLivree(c) && confirmedAt(c) >= since).forEach((c) => {
     (c.lignes || []).forEach((l) => { m[l.produit_id] = (m[l.produit_id] || 0) + Number(l.quantite); });
   });
   return m;
@@ -345,7 +358,9 @@ function computeStats() {
   const credits = A.commandes.filter((c) => c.statut === 'credit');
   const actifs = A.produits.filter((p) => p.actif && suivi(p));
   const articles = sum(ventes, (c) => sum(c.lignes || [], 'quantite'));
-  const benef = ca - cout - vrac;
+  // Marchandise sortie du stock pour les points de vente (donnée : c'est un coût pour Noecy)
+  const pdvCout = sum(A.cmdAll.filter((c) => c.vendeur_id && c.statut !== 'annulee' && confirmedAt(c) >= start), 'cout_revient');
+  const benef = ca - cout - vrac - pdvCout;
 
   const nbJours = A.periode === '7' ? 7 : A.periode === 'mois' ? new Date().getDate() : 30;
   const labels = [], serieCA = [], serieEnc = [];
@@ -375,7 +390,7 @@ function computeStats() {
     .sort((a, b) => String(a.date_reservation).localeCompare(String(b.date_reservation)));
 
   return {
-    ca, cout, benef, marge: ca ? (benef / ca) * 100 : 0, nbVentes: ventes.length, articles,
+    ca, cout, benef, pdvCout, marge: ca ? (benef / ca) * 100 : 0, nbVentes: ventes.length, articles,
     encaisse: sum(entrees, 'montant'), depenses: sum(sorties, 'montant'),
     creances: sum(credits, reste), nbCredits: credits.length,
     devons: sum(A.commandes, nousDevons),
@@ -496,7 +511,7 @@ PAGES.dashboard = {
     <div class="kpis">
       ${kpi("Chiffre d'affaires", s.ca, 'coins', '', true, `${s.nbVentes} vente(s) · ${num(s.articles)} article(s)`, 0, go('commandes', { f: 'toutes' }))}
       ${kpi('Encaissé', s.encaisse, 'wallet', 'leaf', true, 'Argent réellement reçu', 1, go('caisse', { gltype: 'entree' }))}
-      ${kpi('Bénéfice', s.benef, 'piggy-bank', 'mango', true, `Marge ${pct(s.marge)}`, 2, go('rentabilite'))}
+      ${kpi('Bénéfice', s.benef, 'piggy-bank', 'mango', true, s.pdvCout ? `Marge ${pct(s.marge)} · dont ${money(s.pdvCout)} donné aux points de vente` : `Marge ${pct(s.marge)}`, 2, go('rentabilite'))}
       ${kpi('Dépenses', s.depenses, 'receipt', 'caramel', true, 'Achats, fabrication, prélèvements', 3, go('caisse', { gltype: 'sortie' }))}
       ${kpi('Caisse', s.soldes.especes + s.soldes.wave, 'landmark', '', true, `Espèces ${money(s.soldes.especes)} · Wave ${money(s.soldes.wave)}`, 4, go('caisse', { gltype: 'tous' }))}
       ${kpi('Crédits clients', s.creances, 'hand-coins', 'danger', true, `${s.nbCredits} commande(s) à crédit`, 5, go('relances'))}
