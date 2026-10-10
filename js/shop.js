@@ -611,7 +611,6 @@ function renderProfil(animate = true) {
 
       <section class="profil-stats">
         <div class="pstat"><span class="pi">${ic('receipt')}</span><small>Commandes</small><b data-count="${st.nb}">0</b></div>
-        <div class="pstat"><span class="pi">${ic('coins')}</span><small>Total dépensé</small><b data-count="${Math.round(st.total)}" data-money>0</b></div>
         <div class="pstat"><span class="pi">${ic('package')}</span><small>Articles achetés</small><b data-count="${st.articles}">0</b></div>
         <div class="pstat ${c.du > 0 ? 'due' : ''}"><span class="pi">${ic('hand-coins')}</span><small>Reste à payer</small><b>${money(c.du || 0)}</b>${wl ? `<a class="btn wave sm" href="${esc(wl)}" target="_blank" rel="noopener">Payer avec Wave</a>` : ''}</div>
       </section>
