@@ -9,4 +9,6 @@
 window.NOECY_CONFIG = {
   SUPABASE_URL: 'https://cerqgcepwkqvubqizdtp.supabase.co',     // ex. 'https://abcdxyz.supabase.co'
   SUPABASE_ANON_KEY: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNlcnFnY2Vwd2txdnVicWl6ZHRwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTEyMTU0MTIsImV4cCI6MjEwNjc5MTQxMn0.oQFiyyeRRxRxp7jV4mJuRHXKSTbJ-QsFR3-gp70mQL4',  // clé « anon public » (Project Settings > API)
+  // Clé publique VAPID des notifications push (la clé privée va dans les secrets Supabase)
+  VAPID_PUBLIC_KEY: 'BFfvfXn554tufOwP7M44RBuJPLu4nzvdCt8PzuLQOvk0rqYK46bfmnZCMJwOgJKTBvXJymq9G_DOGyxCs9FIvYU',
 };

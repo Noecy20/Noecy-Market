@@ -232,3 +232,5 @@ on conflict (id) do nothing;
 -- DERNIÈRE ÉTAPE : remplacez par VOTRE e-mail de gérante, puis exécutez
 -- ---------------------------------------------------------------------
 -- insert into admins (email) values ('votre.email@exemple.com');
+--
+-- ENSUITE : exécutez migration_v2.sql (nouvelles fonctionnalités).

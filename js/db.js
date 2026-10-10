@@ -8,7 +8,7 @@
   'use strict';
 
   const cfg = window.NOECY_CONFIG || {};
-  const TABLES = ['categories', 'produits', 'clients', 'commandes', 'fabrications', 'ecritures'];
+  const TABLES = ['categories', 'produits', 'clients', 'commandes', 'fabrications', 'ecritures', 'matieres', 'achats'];
 
   const uid = () =>
     (window.crypto && crypto.randomUUID)
@@ -16,6 +16,12 @@
       : 'id-' + Date.now().toString(36) + Math.random().toString(36).slice(2, 10);
   const now = () => new Date().toISOString();
   const clone = (o) => JSON.parse(JSON.stringify(o));
+  const digits = (t) => String(t || '').replace(/\D/g, '');
+  const tel9 = (t) => digits(t).slice(-9);
+  const today = () => {
+    const d = new Date();
+    return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+  };
 
   const DEFAULT_SETTINGS = {
     nom_boutique: 'Noecy Market',
@@ -43,9 +49,11 @@
       description: 'Chips de banane mûre, naturellement sucrées et croustillantes.' },
     { id: 'p-chips-verte', nom: 'Chips banane non mûre', categorie_id: 'cat-chips', prix: 500, unite: 'Sachet',
       description: 'Chips de banane verte, salées et ultra croustillantes.' },
-    { id: 'p-caramel', nom: 'Caramel', categorie_id: 'cat-sucre', prix: 250, unite: 'Sachet',
-      description: 'Caramels maison fondants, préparés en petites quantités.' },
-  ].map((p) => ({ ...p, photo: '', stock: 0, seuil_alerte: 5, actif: true, created_at: now() }));
+    { id: 'p-caramel', nom: 'Caramel', categorie_id: 'cat-sucre', prix: 250, unite: 'Sachet', suivi_stock: false,
+      description: 'Caramels fondants, en petites quantités.' },
+  ].map((p) => ({ suivi_stock: true, photo: '', stock: 0, seuil_alerte: 5, actif: true, created_at: now(), ...p }));
+
+  const MOYENS = ['wave', 'especes', 'mixte', 'credit'];
 
   /* ------------------------------------------------------------------ */
   /* Mode LOCAL                                                          */
@@ -64,6 +72,10 @@
     return 'CMD-' + String(n).padStart(4, '0');
   }
 
+  function checkCode(code) {
+    if (!/^\d{4,6}$/.test(String(code || ''))) throw new Error('Le code secret doit contenir 4 à 6 chiffres.');
+  }
+
   const LocalDB = {
     mode: 'local',
     _db: null,
@@ -75,14 +87,17 @@
           this._db = {
             categories: clone(SEED_CATEGORIES),
             produits: clone(SEED_PRODUITS),
-            clients: [], commandes: [], fabrications: [], ecritures: [],
+            clients: [], commandes: [], fabrications: [], ecritures: [], matieres: [], achats: [],
             parametres: {}, compteur: 0, admin_pin: null,
           };
           this._save();
         }
-        // Migration : anciens emojis de catégorie -> icônes
+        // Migrations des anciennes versions
         const ico = { 'cat-jus': 'cup-soda', 'cat-chips': 'banana', 'cat-sucre': 'candy' };
         (this._db.categories || []).forEach((c) => { if (!c.icone) c.icone = ico[c.id] || 'shopping-bag'; delete c.emoji; });
+        TABLES.forEach((t) => { if (!Array.isArray(this._db[t])) this._db[t] = []; });
+        this._db.produits.forEach((p) => { if (p.suivi_stock === undefined) p.suivi_stock = true; });
+        this._db.ecritures.forEach((e) => { if (!e.compte) e.compte = 'especes'; });
       }
       return this._db;
     },
@@ -98,30 +113,73 @@
     async listCategories() { return clone(this.db().categories).sort((a, b) => (a.ordre || 0) - (b.ordre || 0)); },
     async listProducts() { return clone(this.db().produits.filter((p) => p.actif)); },
 
-    async registerClient(nom, telephone) {
+    _findTel(telephone) {
+      const t = tel9(telephone);
+      return this.db().clients.filter((c) => c.statut !== 'refuse' && tel9(c.telephone) === t)
+        .sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)))[0];
+    },
+    async registerClient(nom, telephone, code) {
       nom = (nom || '').trim();
       if (nom.length < 2) throw new Error('Le nom est obligatoire.');
-      const c = { id: uid(), token: uid(), nom, telephone: (telephone || '').trim(), statut: 'en_attente', note: '', created_at: now() };
+      if (digits(telephone).length < 8) throw new Error('Le numéro de téléphone est obligatoire.');
+      checkCode(code);
+      if (this._findTel(telephone)) throw new Error('Ce numéro a déjà un compte. Utilisez « J\'ai déjà un compte ».');
+      const c = {
+        id: uid(), token: uid(), nom, telephone: String(telephone).trim(), statut: 'en_attente', note: '',
+        code_hash: await sha256(code), essais: 0, bloque_jusqua: null, created_at: now(),
+      };
       this.db().clients.push(c); this._save();
       return { id: c.id, token: c.token };
     },
-    async getClient(id, token) {
-      const c = this.db().clients.find((x) => x.id === id && x.token === token);
-      return c ? { id: c.id, nom: c.nom, telephone: c.telephone, statut: c.statut } : null;
+    async loginClient(telephone, code) {
+      const c = this._findTel(telephone);
+      if (!c) throw new Error('Aucun compte avec ce numéro.');
+      if (c.bloque_jusqua && new Date(c.bloque_jusqua) > new Date()) throw new Error('Trop d\'essais. Réessayez dans quelques minutes.');
+      if (!c.code_hash) throw new Error('Ce compte n\'a pas encore de code. Demandez à Noecy votre lien de connexion.');
+      if ((await sha256(code)) !== c.code_hash) {
+        c.essais = (c.essais || 0) + 1;
+        if (c.essais >= 5) { c.bloque_jusqua = new Date(Date.now() + 15 * 60000).toISOString(); c.essais = 0; }
+        this._save();
+        throw new Error('Code incorrect.');
+      }
+      c.essais = 0; c.bloque_jusqua = null; this._save();
+      return { id: c.id, token: c.token };
     },
-    async placeOrder(id, token, lignes, moyen, note) {
+    async setClientCode(id, token, code) {
+      checkCode(code);
+      const c = this.db().clients.find((x) => x.id === id && x.token === token);
+      if (!c) throw new Error('Client inconnu.');
+      c.code_hash = await sha256(code); this._save();
+    },
+    async adminSetClientCode(clientId, code) {
+      checkCode(code);
+      const c = this.db().clients.find((x) => x.id === clientId);
+      if (!c) throw new Error('Client inconnu.');
+      c.code_hash = await sha256(code); c.essais = 0; c.bloque_jusqua = null; this._save();
+    },
+    async getClient(id, token) {
+      const db = this.db();
+      const c = db.clients.find((x) => x.id === id && x.token === token);
+      if (!c) return null;
+      const du = db.commandes.filter((o) => o.client_id === c.id && o.statut === 'credit')
+        .reduce((s, o) => s + Math.max(0, o.total - ((o.montant_paye || 0) - (o.rendu || 0))), 0);
+      return { id: c.id, nom: c.nom, telephone: c.telephone, statut: c.statut, a_code: !!c.code_hash, du };
+    },
+    async placeOrder(id, token, lignes, moyen, note, extra = {}) {
       const db = this.db();
       const c = db.clients.find((x) => x.id === id && x.token === token);
       if (!c) throw new Error('Client inconnu.');
       if (c.statut !== 'valide') throw new Error('Votre nom doit être validé avant de commander.');
-      if (!['wave', 'especes', 'credit'].includes(moyen)) throw new Error('Moyen de paiement invalide.');
+      if (!MOYENS.includes(moyen)) throw new Error('Moyen de paiement invalide.');
+      const dateResa = extra.date_reservation || null;
+      if (dateResa && dateResa < today()) throw new Error('La date de réservation est déjà passée.');
       const out = []; let total = 0;
       for (const l of lignes) {
         const q = parseInt(l.quantite, 10);
         if (!q || q <= 0) continue;
         const p = db.produits.find((x) => x.id === l.produit_id && x.actif);
         if (!p) throw new Error('Un produit du panier n\'est plus disponible.');
-        if (p.stock < q) throw new Error(`Stock insuffisant pour ${p.nom} (${p.stock} disponible(s)).`);
+        if (p.suivi_stock && !dateResa && p.stock < q) throw new Error(`Stock insuffisant pour ${p.nom} (${p.stock} disponible(s)). Choisissez une date de réservation.`);
         out.push({ produit_id: p.id, nom: p.nom, prix: p.prix, quantite: q });
         total += p.prix * q;
       }
@@ -129,8 +187,9 @@
       db.compteur = (db.compteur || 0) + 1;
       const cmd = {
         id: uid(), numero: numero(db.compteur), client_id: c.id, client_nom: c.nom, lignes: out, total,
-        moyen_paiement: moyen, statut: 'en_attente', montant_paye: 0, cout_revient: 0, paiements: [],
-        note: (note || '').slice(0, 500), created_at: now(), confirmed_at: null, paid_at: null,
+        moyen_paiement: moyen, statut: 'en_attente', montant_paye: 0, rendu: 0, cout_revient: 0, paiements: [],
+        note: (note || '').slice(0, 500), date_reservation: dateResa, heure_reservation: extra.heure_reservation || null,
+        repartition: extra.repartition || null, created_at: now(), confirmed_at: null, paid_at: null, livree_at: null,
       };
       db.commandes.push(cmd); this._save();
       return clone(cmd);
@@ -141,10 +200,15 @@
       return clone(db.commandes.filter((c) => c.client_id === id)).sort((a, b) => b.created_at.localeCompare(a.created_at));
     },
 
+    // --- Notifications push : indisponibles sans serveur ---
+    pushDisponible() { return false; },
+    async savePushClient() { throw new Error('Notifications disponibles uniquement en mode en ligne.'); },
+    async savePushAdmin() { throw new Error('Notifications disponibles uniquement en mode en ligne.'); },
+    async sendPush() { throw new Error('Notifications disponibles uniquement en mode en ligne.'); },
+
     // --- Gérante ---
     async hasAdmin() { return true; },
     async _pinHash() { return this.db().admin_pin || sha256(DEFAULT_PIN); },
-    async setupAdmin(pin) { this.db().admin_pin = await sha256(pin); this._save(); sessionStorage.setItem('noecy_admin', '1'); },
     async login(_ignored, pin) {
       if ((await sha256(pin)) !== (await this._pinHash())) throw new Error('Code PIN incorrect.');
       sessionStorage.setItem('noecy_admin', '1');
@@ -156,7 +220,11 @@
       this.db().admin_pin = await sha256(newPin); this._save();
     },
 
-    async all(t) { return clone(this.db()[t]); },
+    async all(t) {
+      const rows = clone(this.db()[t]);
+      if (t === 'clients') rows.forEach((c) => { c.a_code = !!c.code_hash; delete c.code_hash; });
+      return rows;
+    },
     async insert(t, row) {
       const r = { id: uid(), created_at: now(), ...row };
       this.db()[t].push(r); this._save(); return clone(r);
@@ -175,8 +243,11 @@
     async exportAll() { const d = clone(this.db()); delete d.admin_pin; return d; },
     async importAll(data) {
       const pin = this.db().admin_pin;
-      for (const t of TABLES) if (!Array.isArray(data[t])) throw new Error('Fichier de sauvegarde invalide.');
+      for (const t of ['categories', 'produits', 'clients', 'commandes', 'fabrications', 'ecritures']) {
+        if (!Array.isArray(data[t])) throw new Error('Fichier de sauvegarde invalide.');
+      }
       this._db = { ...data, admin_pin: pin }; this._save();
+      this._db = null; this.db();
     },
   };
 
@@ -186,6 +257,17 @@
   const chk = ({ data, error }) => {
     if (error) throw new Error(error.message || 'Erreur serveur');
     return data;
+  };
+  // Les fonctions RPC renvoient { erreur } quand l'échec doit être enregistré côté serveur
+  const chkRpc = (r) => {
+    const d = chk(r);
+    if (d && d.erreur) throw new Error(d.erreur);
+    return d;
+  };
+
+  const subJson = (sub) => {
+    const j = sub.toJSON ? sub.toJSON() : sub;
+    return { endpoint: j.endpoint, p256dh: j.keys.p256dh, auth: j.keys.auth };
   };
 
   const SupabaseDB = {
@@ -206,17 +288,45 @@
     async listCategories() { return chk(await this.sb.from('categories').select('*').order('ordre')); },
     async listProducts() { return chk(await this.sb.from('produits').select('*').eq('actif', true).order('nom')); },
 
-    async registerClient(nom, telephone) {
-      return chk(await this.sb.rpc('inscrire_client', { p_nom: nom, p_telephone: telephone || '' }));
+    async registerClient(nom, telephone, code) {
+      return chkRpc(await this.sb.rpc('inscrire_client', { p_nom: nom, p_telephone: telephone || '', p_code: code || '' }));
+    },
+    async loginClient(telephone, code) {
+      return chkRpc(await this.sb.rpc('connexion_client', { p_telephone: telephone || '', p_code: code || '' }));
+    },
+    async setClientCode(id, token, code) {
+      chkRpc(await this.sb.rpc('definir_code_client', { p_id: id, p_token: token, p_code: code }));
+    },
+    async adminSetClientCode(clientId, code) {
+      chkRpc(await this.sb.rpc('admin_definir_code', { p_client_id: clientId, p_code: code }));
     },
     async getClient(id, token) {
       return chk(await this.sb.rpc('statut_client', { p_id: id, p_token: token }));
     },
-    async placeOrder(id, token, lignes, moyen, note) {
-      return chk(await this.sb.rpc('passer_commande', { p_id: id, p_token: token, p_lignes: lignes, p_moyen: moyen, p_note: note || '' }));
+    async placeOrder(id, token, lignes, moyen, note, extra = {}) {
+      return chk(await this.sb.rpc('passer_commande', {
+        p_id: id, p_token: token, p_lignes: lignes, p_moyen: moyen, p_note: note || '',
+        p_date: extra.date_reservation || null, p_heure: extra.heure_reservation || null, p_repartition: extra.repartition || null,
+      }));
     },
     async myOrders(id, token) {
       return chk(await this.sb.rpc('mes_commandes', { p_id: id, p_token: token })) || [];
+    },
+
+    // --- Notifications push ---
+    pushDisponible() { return !!cfg.VAPID_PUBLIC_KEY; },
+    async savePushClient(id, token, sub) {
+      chkRpc(await this.sb.rpc('abonner_push_client', { p_id: id, p_token: token, p_sub: subJson(sub) }));
+    },
+    async savePushAdmin(sub) {
+      const s = subJson(sub);
+      chk(await this.sb.from('abonnements_push').upsert({ id: uid(), role: 'admin', client_id: null, ...s }, { onConflict: 'endpoint' }));
+    },
+    async sendPush(payload) {
+      const { data, error } = await this.sb.functions.invoke('notifier', { body: payload });
+      if (error) throw new Error('Envoi impossible : la fonction « notifier » est-elle déployée ?');
+      if (data && data.erreur) throw new Error(data.erreur);
+      return data;
     },
 
     async hasAdmin() { return true; },
@@ -233,7 +343,14 @@
     },
     async logout() { await this.sb.auth.signOut(); },
 
-    async all(t) { return chk(await this.sb.from(t).select('*').order('created_at', { ascending: true })); },
+    async all(t) {
+      if (t === 'clients') {
+        const rows = chk(await this.sb.from('clients').select('*').order('created_at', { ascending: true }));
+        rows.forEach((c) => { c.a_code = !!c.code_hash; delete c.code_hash; });
+        return rows;
+      }
+      return chk(await this.sb.from(t).select('*').order('created_at', { ascending: true }));
+    },
     async insert(t, row) { return chk(await this.sb.from(t).insert({ id: uid(), ...row }).select().single()); },
     async update(t, id, patch) { return chk(await this.sb.from(t).update(patch).eq('id', id).select().single()); },
     async remove(t, id) { chk(await this.sb.from(t).delete().eq('id', id)); },

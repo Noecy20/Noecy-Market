@@ -700,3 +700,145 @@ table.tbl { width: 100%; border-collapse: collapse; font-size: 14px; }
 .pay-opt .pi .ic { width: 20px; height: 20px; color: var(--ink2); }
 .chip .ic { width: 16px; height: 16px; }
 .cat-ic { width: 44px; height: 44px; border-radius: 12px; display: grid; place-items: center; background: var(--c); color: #fff; }
+
+/* =====================================================================
+   v2 : caisse, réservations, dettes, notifications, responsive
+   ===================================================================== */
+/* Notifications à l'écran : fermables */
+.toast { cursor: pointer; touch-action: pan-y; transition: transform .2s, opacity .2s; }
+.toast span { flex: 1; }
+.toast-x { border: 0; background: rgba(255,255,255,.12); color: #fff; width: 26px; height: 26px; border-radius: 8px; display: grid; place-items: center; cursor: pointer; flex: none; }
+.toast-x .ic { width: 14px; height: 14px; color: #fff !important; }
+
+/* Boutique : statut client */
+.status-stack { display: flex; flex-direction: column; align-items: flex-start; gap: 10px; margin-top: 22px; }
+.status-stack .status-card { margin-top: 0; }
+button.status-card { border: 0; color: #fff; cursor: pointer; text-align: left; font: inherit; }
+.status-card.debt { background: rgba(224,67,90,.25); flex-wrap: wrap; }
+.status-card.debt .si { background: var(--danger); }
+.status-card .btn { margin-left: 4px; }
+.status-actions { display: flex; gap: 8px; flex-wrap: wrap; animation: fadeUp .8s .3s var(--ease) both; }
+.status-pill {
+  display: inline-flex; align-items: center; gap: 7px; padding: 9px 14px; border-radius: 99px; border: 0; cursor: pointer;
+  background: #fff; color: var(--plum); font-weight: 600; font-size: 13.5px; box-shadow: 0 10px 24px -12px rgba(0,0,0,.5);
+  transition: transform .25s var(--spring);
+}
+.status-pill:hover { transform: translateY(-2px); }
+.status-pill .ic { width: 16px; height: 16px; }
+.gate-tabs { margin: 4px 0 16px; width: 100%; }
+.gate-tabs button { flex: 1; justify-content: center; }
+.gate form p { margin-bottom: 14px; }
+
+.cart-h { margin: 20px 0 10px; font-size: 15px; display: flex; gap: 8px; align-items: baseline; }
+.seg-full { display: flex; width: 100%; }
+.seg-full button { flex: 1; justify-content: center; }
+.seg button:disabled { opacity: .4; cursor: not-allowed; }
+.mixte-box { margin: -4px 0 6px; padding: 12px; border-radius: 16px; background: var(--plum-soft); }
+.mixte-box .field { margin-bottom: 0; }
+.resa-line { display: inline-flex; align-items: center; gap: 6px; font-size: 13.5px; color: var(--plum); background: var(--plum-soft); padding: 6px 10px; border-radius: 10px; margin: 6px 0; }
+.account-card { display: flex; align-items: center; gap: 12px; padding: 14px; border-radius: 18px; background: linear-gradient(135deg, #fbf3f7, #fff8ea); }
+.account-card b { display: block; }
+.account-actions { display: flex; gap: 8px; flex-wrap: wrap; margin: 12px 0 4px; }
+
+/* Gérante : commandes et paiements */
+.owe-line { display: flex; align-items: center; gap: 6px; font-size: 13.5px; padding: 8px 10px; border-radius: 11px; background: var(--caramel-soft); color: #8a4a12; }
+.btn.icon-only { flex: 0 0 auto !important; padding-left: 10px; padding-right: 10px; }
+.pm-sum { padding: 12px 14px; border-radius: 14px; background: #fcf8fa; margin: 2px 0 12px; }
+.pm-rendu { display: grid; gap: 8px; padding: 12px 14px; border-radius: 14px; background: var(--mango-soft); margin-bottom: 8px; font-size: 14px; }
+.pm-rendu .check { align-items: flex-start; font-weight: 500; }
+.pm-rendu input { margin-top: 2px; }
+.toggle-line { align-items: flex-start; padding: 12px 14px; border-radius: 14px; background: #fcf8fa; margin-bottom: 14px; }
+.toggle-line .switch { margin-top: 2px; }
+.big-amount { font-size: 26px; font-weight: 800; color: var(--danger); letter-spacing: -.03em; }
+.big-amount.owe { color: #b05a00; }
+.client-card.owe { border-top: 4px solid var(--caramel); }
+
+/* Gérante : caisse */
+.compte-card {
+  display: flex; align-items: center; gap: 14px; padding: 18px; border-radius: var(--r); background: #fff; box-shadow: var(--sh); cursor: pointer;
+  transition: transform .35s var(--spring); animation: cardIn .5s var(--ease) both;
+}
+.compte-card:hover { transform: translateY(-3px); }
+.compte-card .ci { width: 46px; height: 46px; border-radius: 15px; display: grid; place-items: center; color: #fff; flex: none; }
+.compte-card.especes .ci { background: var(--leaf); }
+.compte-card.wave .ci { background: var(--wave); color: #052b38; }
+.compte-card.total .ci { background: var(--grad); }
+.compte-card small { display: block; color: var(--muted); font-weight: 600; }
+.compte-card b { font-size: clamp(19px, 2.2vw, 26px); font-weight: 800; letter-spacing: -.03em; white-space: nowrap; }
+.period-sum { display: flex; gap: 16px; flex-wrap: wrap; padding: 10px 14px; margin-bottom: 12px; border-radius: 14px; background: #fff; box-shadow: var(--sh); }
+
+/* Divers */
+.head-actions, .btn-row { display: flex; gap: 8px; flex-wrap: wrap; }
+.save-bar { position: sticky; bottom: 16px; margin-top: 18px; display: flex; justify-content: flex-end; z-index: 5; }
+.kpi.link { cursor: pointer; }
+.kpis-3 { grid-template-columns: repeat(3, 1fr); }
+.alert-x { width: 30px; height: 30px; flex: none; }
+.alert.gone { animation: alertOut .35s var(--ease) forwards; }
+@keyframes alertOut { to { opacity: 0; transform: translateX(40px); height: 0; padding: 0; margin: 0; } }
+.rank .date-pos { flex-direction: column; width: 40px; height: 40px; line-height: 1; background: var(--plum-soft) !important; color: var(--plum) !important; }
+.rank .date-pos b { font-size: 15px; }
+.rank .date-pos small { font-size: 10px; text-transform: uppercase; }
+.rank.cols { grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); column-gap: 24px; }
+.avatar.sm { width: 34px; height: 34px; border-radius: 11px; font-size: 13px; }
+.dash-grid .span3 { grid-column: 1 / -1; }
+.cell-prod { display: flex; gap: 12px; align-items: center; }
+.nowrap { white-space: nowrap; }
+.mat-line { grid-template-columns: 1fr 120px 40px; }
+
+/* ---------- Responsive ---------- */
+@media (max-width: 960px) {
+  .adm-top { padding: 10px 14px; gap: 8px; }
+  .adm-top h2 { font-size: 17px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+}
+@media (max-width: 720px) {
+  .page { padding: 16px 12px 40px; }
+  .page-head { margin-bottom: 16px; }
+  .page-head > div:first-child { width: 100%; }
+  .page-head p { font-size: 14px; }
+  .head-actions { width: 100%; }
+  .head-actions .btn { flex: 1; padding-left: 10px; padding-right: 10px; }
+  .page-head > .btn { width: 100%; }
+  .toolbar { gap: 8px; }
+  .toolbar .search { flex: 1 1 100%; max-width: none; }
+  .seg.scroll { flex-wrap: nowrap; overflow-x: auto; max-width: 100%; scrollbar-width: none; }
+  .seg.scroll::-webkit-scrollbar { display: none; }
+  .seg button { padding: 8px 11px; white-space: nowrap; }
+  .kpis-3 { grid-template-columns: 1fr; }
+  .ledger-sum { grid-template-columns: 1fr 1fr; gap: 10px; }
+  .compte-card { padding: 12px; gap: 10px; }
+  .compte-card.total { grid-column: 1 / -1; }
+  .compte-card .ci { width: 38px; height: 38px; border-radius: 12px; }
+  .compte-card b { font-size: 18px; }
+  .card { padding: 16px; }
+  .chart-box { height: 230px; }
+  .tbl { font-size: 13px; }
+  .tbl th, .tbl td { padding: 10px 9px; }
+  .stock-num { font-size: 18px; }
+  .cell-prod .thumb { width: 40px; height: 40px; border-radius: 11px; }
+  .oc-actions .btn { flex: 1 1 auto; }
+  .oc-actions .btn.icon-only { flex: 0 0 auto; }
+  .modal-body { padding: 8px 16px 16px; }
+  .modal-head { padding: 18px 16px 6px; }
+  .modal-foot { padding: 12px 16px 16px; }
+  .modal-foot .btn { flex: 1; }
+  .dep-line { grid-template-columns: 1fr 100px 36px; }
+  .mat-line { grid-template-columns: 1fr 86px 36px; }
+  .cat-row { grid-template-columns: 40px minmax(0, 1fr) minmax(0, 1fr) 42px 36px; gap: 6px; }
+  .cat-ic { width: 40px; height: 40px; }
+  .period-sum { gap: 10px; }
+  .save-bar .btn { width: 100%; }
+  .rank.cols { grid-template-columns: 1fr; }
+}
+@media (max-width: 420px) {
+  .kpi .kv { font-size: 18px; }
+  .kpi .ks { font-size: 11.5px; }
+  .compte-card b { font-size: 20px; }
+  .hero { margin: 12px 10px 0; border-radius: 26px; padding: 28px 20px; }
+  .status-card { padding: 10px 12px 10px 10px; }
+  .status-card b { font-size: 14px; }
+  .shop-top { padding: 10px 14px; }
+  .brand-name { font-size: 18px; }
+  .cart-line { gap: 8px; }
+  .cart-line .lt { min-width: 64px; font-size: 14px; }
+  .pay-opt { padding: 11px 12px; }
+}

@@ -2,54 +2,61 @@
 
 Application web de gestion et de vente pour Noecy Market : jus (bissap, tomi), chips de banane, douceurs (caramel).
 
-- **Boutique client** (`/`) : nom obligatoire → validation par la gérante → panier → paiement Wave / espèces / plus tard.
-- **Espace gérante** (`/#/admin`) : tableau de bord + alertes, commandes, clients, produits, stock & fabrication, rentabilité, grand livre, relances crédit, paramètres.
+- **Boutique client** (`/`) : inscription (nom + téléphone + code secret) → validation par la gérante → panier → commande immédiate ou réservée pour un jour → paiement Wave, espèces, les deux, ou plus tard.
+- **Espace gérante** (`/#/admin`) : tableau de bord et alertes, commandes, clients, caisse par compte (espèces / Wave), produits, stock & achats (matières premières réutilisables), rentabilité, crédits & dettes, paramètres, notifications push.
 
-Aucune installation : HTML + CSS + JavaScript, aucune étape de build.
+Aucune installation : HTML + CSS + JavaScript, aucune étape de build. Installable sur l'écran d'accueil du téléphone (PWA).
 
 ---
 
 ## 1. Essayer tout de suite (mode local)
 
-Ouvrez `index.html` dans le navigateur (ou lancez `python3 -m http.server` dans ce dossier puis ouvrez http://localhost:8000).
+Lancez `python3 -m http.server` dans ce dossier puis ouvrez http://localhost:8000.
 
-En **mode local**, tout est enregistré dans le navigateur. C'est parfait pour tester, mais **vos clients ne verront pas vos données depuis leur téléphone**. Pour la vraie utilisation, passez au mode en ligne (étape 2).
+Sans clés Supabase dans `js/config.js`, tout est enregistré dans le navigateur : parfait pour tester, mais **vos clients ne verront pas vos données depuis leur téléphone**.
 
-Au premier accès à `#/admin`, on vous demande de créer un code PIN.
+Code PIN de l'espace gérante en mode local : **2012** (à changer dans Paramètres).
 
 ---
 
-## 2. Mettre en ligne gratuitement (≈ 10 minutes)
+## 2. Mettre en ligne gratuitement
 
 ### a) La base de données : Supabase (gratuit)
 
-1. Créez un compte sur https://supabase.com, puis **New project** (choisissez la région *Europe*, ex. Paris/Frankfurt).
-2. Menu **SQL Editor** → **New query** → collez tout le contenu de `supabase/schema.sql` → **Run**.
-3. Menu **Authentication → Users → Add user** : créez votre compte gérante (e-mail + mot de passe), cochez *Auto Confirm User*.
-4. Retour dans **SQL Editor**, exécutez (avec VOTRE e-mail) :
+1. Créez un projet sur https://supabase.com (région *Europe*).
+2. **SQL Editor** → **New query** → collez `supabase/schema.sql` → **Run**.
+3. Nouvelle requête → collez `supabase/migration_v2.sql` → **Run** (caisse par compte, matières, réservations, connexion client, notifications).
+4. **Authentication → Users → Add user** : créez votre compte gérante (cochez *Auto Confirm User*), puis :
    ```sql
    insert into admins (email) values ('votre.email@exemple.com');
    ```
 5. Recommandé : **Authentication → Sign In / Providers → Email** → désactivez *Allow new users to sign up*.
-6. Menu **Project Settings → API** : copiez **Project URL** et la clé **anon public**.
-7. Collez-les dans `js/config.js` :
-   ```js
-   window.NOECY_CONFIG = {
-     SUPABASE_URL: 'https://xxxx.supabase.co',
-     SUPABASE_ANON_KEY: 'eyJhbGciOi...',
-   };
-   ```
-   > La clé *anon* est faite pour être publique : la sécurité est assurée par les règles RLS du fichier SQL.
-   > Ne mettez **jamais** la clé `service_role` dans ce fichier.
+6. **Project Settings → API** : copiez **Project URL** et la clé **anon public** dans `js/config.js`.
+   > La clé *anon* est faite pour être publique : la sécurité est assurée par les règles RLS. Ne mettez **jamais** la clé `service_role` dans ce fichier.
 
-### b) L'hébergement du site (gratuit)
+### b) Les notifications push (même application fermée)
 
-**Option la plus simple : Netlify Drop**
-1. Allez sur https://app.netlify.com/drop
-2. Glissez-déposez le dossier `Noecy_market` entier.
-3. Vous obtenez un lien du type `https://noecy-market.netlify.app` → partagez-le à vos clients !
+1. **Edge Functions** → **Deploy a new function** → **Via Editor** → nom : `notifier` → collez le contenu de `supabase/functions/notifier/index.ts` → **Deploy**.
+2. **Edge Functions → Secrets** : ajoutez `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY` et `NOECY_PUSH_SECRET` (valeurs dans `SECRETS_SUPABASE.local.txt`, fichier privé non publié).
+3. **SQL Editor** : exécutez `supabase/config_push.local.sql` (fichier privé : il indique à la base où envoyer les notifications).
+4. Dans l'app : **Paramètres → Notifications → Activer sur cet appareil**, puis **Tester**.
 
-Autres options gratuites : **Vercel**, **Cloudflare Pages**, **GitHub Pages** (dossier à la racine, aucune commande de build).
+Pour générer de nouvelles clés : `npx web-push generate-vapid-keys` (la clé publique va dans `js/config.js`, la clé privée dans les secrets Supabase).
+
+Ce qui est notifié :
+
+| Qui | Quand |
+|---|---|
+| Gérante | Nouvelle commande ou réservation, nouveau client à valider, résumé chaque matin à 9 h |
+| Client | Compte validé, réservation acceptée, commande remise / réglée / annulée |
+| Client à crédit | Rappel automatique chaque jour à 9 h dès que le crédit a plus d'un jour (message modifiable dans Paramètres) |
+
+**iPhone** : les notifications web fonctionnent seulement si l'app est ajoutée à l'écran d'accueil (Safari → Partager → *Sur l'écran d'accueil*), puis ouverte depuis l'icône (iOS 16.4 ou plus).
+
+### c) L'hébergement du site (gratuit)
+
+**Netlify Drop** : glissez le dossier sur https://app.netlify.com/drop (sans les fichiers `*.local.*`).
+Ou reliez le dépôt GitHub à Netlify / Vercel / Cloudflare Pages (aucune commande de build, dossier de publication `.`).
 
 L'espace gérante est à l'adresse : `https://votre-site/#/admin`.
 
@@ -57,48 +64,58 @@ L'espace gérante est à l'adresse : `https://votre-site/#/admin`.
 
 ## 3. Le lien de paiement Wave
 
-Dans l'app **Wave Business** : *Encaisser* → *Partager le lien de paiement*. Collez ce lien dans **Paramètres → Paiement Wave**.
-
-Pour que le montant soit pré-rempli, ajoutez `{montant}` à l'endroit voulu, par exemple :
-`https://pay.wave.com/m/M_XXXX/c/sn/?amount={montant}`
-
-Le bouton « Payer avec Wave » apparaît au client après sa commande et dans « Mes commandes ». Il est aussi ajouté aux messages de relance.
+Dans **Wave Business** : *Encaisser* → *Partager le lien de paiement*. Collez-le dans **Paramètres → Paiement Wave**.
+Ajoutez `{montant}` pour pré-remplir le montant, par exemple `https://pay.wave.com/m/M_XXXX/c/sn/?amount={montant}`.
 
 ---
 
 ## 4. Comment ça marche
 
-| Étape | Effet |
-|---|---|
-| Le client entre son nom | Demande « À valider » dans **Clients** (doublons signalés) |
-| Vous validez | Le client peut ajouter au panier et commander (animation de confettis) |
-| Le client commande | Commande « En attente » + notification sonore côté gérante |
-| Vous cliquez **Payée** | Stock déduit + entrée dans le grand livre |
-| Vous cliquez **Crédit** (ou paiement partiel) | Stock déduit, **pas** d'argent → apparaît dans **Relances crédit** |
-| **Encaisser** un crédit | Entrée « Règlement crédit » au grand livre |
-| **Nouvelle fabrication** | +stock, dépenses au grand livre, coût de revient par unité calculé |
-| **Annuler** une vente | Articles remis en stock, remboursement noté au grand livre |
+### Clients sans mot de passe
+- À l'inscription, le client choisit un **code secret** (4 à 6 chiffres).
+- Sur un autre téléphone : « J'ai déjà un compte » → numéro + code. Après 5 erreurs, le compte est bloqué 15 minutes.
+- Code oublié ou ancien client sans code : **Clients → Lien** envoie par WhatsApp un lien de connexion personnel, ou **Clients → clé** définit un nouveau code.
 
-**Bénéfice** = prix de vente − coût moyen par unité (total des dépenses ÷ unités fabriquées).
+### Commandes et argent
 
-**Alertes du tableau de bord** : rupture, stock sous le seuil, produit qui part vite (≤ 3 jours de stock au rythme des 7 derniers jours), clients/commandes en attente, crédits de plus de 7 jours.
+| Action | Stock | Caisse |
+|---|---|---|
+| **Remettre & encaisser** | Déduit (produits comptés) | Entrée sur le compte choisi (espèces et/ou Wave) |
+| **À crédit** | Déduit | Rien : la somme apparaît dans **Crédits & dettes** |
+| **Réserver** (avec avance facultative) | Rien jusqu'à la remise | Avance enregistrée → « Nous devons » tant que la marchandise n'est pas remise |
+| Trop perçu, monnaie non rendue | — | Le client apparaît dans « Vous leur devez » → **Rendre l'argent** |
+| **Remboursement reçu** d'un client | — | Réparti sur ses crédits, du plus ancien au plus récent |
+| **Annuler** | Remis en stock si déjà remis | Remboursement maintenant ou plus tard |
 
-Les relances WhatsApp ajoutent l'indicatif 221 (Sénégal) aux numéros à 9 chiffres ; saisissez l'indicatif complet pour un autre pays.
+### Caisse
+Solde par compte (**Espèces**, **Wave**, total). **Dépense** = argent pris dans la caisse (motif + montant + compte), **Entrée** = apport, **Transfert** = retrait Wave ↔ espèces. Pour démarrer, enregistrez votre fond de caisse en **Entrée → Apport**.
+
+### Stock, achats et bénéfice
+- **Matières premières** (sucre, fleurs, bananes, huile, bouteilles…) : achetées une fois, utilisées sur plusieurs fabrications. Leur coût est réparti au prorata de la quantité utilisée.
+- **Fabrication** = matières utilisées + autres dépenses du lot → coût par unité et bénéfice attendu.
+- **Produits en vrac** (ex. caramels achetés 1 000 ou 2 000 et revendus sans les compter) : désactivez « Compter le stock » sur le produit et enregistrez chaque achat. Bénéfice = ventes − achats.
+
+Les relances WhatsApp ajoutent l'indicatif 221 (Sénégal) aux numéros à 9 chiffres.
 
 ---
 
 ## 5. Sauvegardes
 
-**Paramètres → Sauvegarder (JSON)** télécharge toutes vos données. Faites-le régulièrement.
+**Paramètres → Sauvegarder (JSON)** télécharge toutes vos données.
 
 ## Structure
 
 ```
 Noecy_market/
-├── index.html
+├── index.html, sw.js, manifest*.webmanifest, icons/
 ├── css/style.css
-├── js/config.js        ← vos clés Supabase
-├── js/db.js            ← accès aux données (local ou Supabase)
-├── js/app.js           ← boutique + espace gérante
-└── supabase/schema.sql ← tables, sécurité RLS, fonctions
+├── js/config.js           ← clés Supabase + clé publique VAPID
+├── js/db.js               ← accès aux données (local ou Supabase)
+├── js/core.js             ← outils communs, notifications
+├── js/shop.js             ← boutique client
+├── js/admin*.js           ← espace gérante
+├── js/app.js              ← routeur
+└── supabase/
+    ├── schema.sql, migration_v2.sql
+    └── functions/notifier/index.ts   ← envoi des notifications push
 ```
